@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <title>TSV → Markdown テーブル変換＆プレビュー</title>
+  <style>
+    body { font-family: sans-serif; padding: 20px; }
+    textarea { width: 100%; box-sizing: border-box; font-family: monospace; }
+    #output, #preview { height: 200px; }
+    #error { color: red; margin-top: 10px; }
+    button { margin: 10px 0; padding: 8px 16px; }
+    #preview {
+      border: 1px solid #ccc;
+      padding: 10px;
+      overflow: auto;
+      background: #fafafa;
+    }
+    /* ここから枠線スタイル */
+    #preview table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    #preview th,
+    #preview td {
+      border: 1px solid #999;
+      padding: 4px 8px;
+    }
+    /* optional: ヘッダー行を目立たせる */
+    #preview th {
+      background: #eee;
+    }
+    /* スクロール時でもヘッダーを固定したい場合（ブラウザによって動作が異なります） */
+    /* #preview th {
+      position: sticky;
+      top: 0;
+      background: #eee;
+    } */
+    /* ここまで枠線スタイル */
+  </style>
+  <!-- marked.js を CDN から読み込み -->
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+</head>
+<body>
+  <h1>TSV → Markdown テーブル変換＆プレビュー</h1>
+  <p>TSV データを貼り付けて「変換」ボタンを押すと、Markdown とプレビューが生成されます。</p>
+
+  <label for="input">TSV 入力：</label>
+  <textarea id="input" rows="6" placeholder="Key\tType\t…\n2EA21B7…\trefresh_token\t…"></textarea>
+
+  <button id="convert">変換</button>
+  <div id="error"></div>
+
+  <label for="output">Markdown 出力：</label>
+  <textarea id="output" readonly></textarea>
+
+  <h2>Markdown プレビュー：</h2>
+  <div id="preview"></div>
+
+  <script>
+    function tsvToMarkdown(tsv) {
+      const rows = tsv
+        .trim()
+        .split('\n')
+        .map(line => line.split('\t'));
+
+      if (rows.length < 2) {
+        throw new Error('ヘッダ行＋データ行が最低 1 行必要です');
+      }
+      const header = rows[0];
+      const colCount = header.length;
+      for (let i = 1; i < rows.length; i++) {
+        if (rows[i].length !== colCount) {
+          throw new Error(
+            `データ行 ${i+1} の列数 (${rows[i].length}) がヘッダ列数 (${colCount}) と異なります。`
+          );
+        }
+      }
+      const separator = header.map(() => '---');
+      const all = [header, separator, ...rows.slice(1)];
+      return all.map(cols => `| ${cols.join(' | ')} |`).join('\n');
+    }
+
+    document.getElementById('convert').addEventListener('click', () => {
+      const inArea  = document.getElementById('input');
+      const outArea = document.getElementById('output');
+      const prev    = document.getElementById('preview');
+      const errDiv  = document.getElementById('error');
+      errDiv.textContent = '';
+      outArea.value = '';
+      prev.innerHTML = '';
+
+      try {
+        const md = tsvToMarkdown(inArea.value);
+        outArea.value = md;
+        prev.innerHTML = marked.parse(md);
+      } catch (e) {
+        errDiv.textContent = e.message;
+      }
+    });
+  </script>
+</body>
+</html>
