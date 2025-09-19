@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <title>sp_executesql 展開ツール</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root { --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans JP", "Hiragino Kaku Gothic ProN", Meiryo, sans-serif; padding: 16px; line-height:1.6; }
+    h1 { font-size: 18px; margin: 0 0 8px; }
+    .row { display:grid; grid-template-columns: 1fr; gap: 12px; }
+    @media (min-width: 980px) { .row { grid-template-columns: 1fr 1fr; } }
+    .box { border:1px solid #ddd; border-radius:6px; padding:10px; background:#fafafa; }
+    .box h2 { margin:4px 2px 8px; font-size: 14px; }
+    textarea { width:100%; min-height:320px; border:1px solid #ccc; border-radius:4px; padding:8px; font: 12.5px/1.5 var(--mono); resize: vertical; }
+    textarea[readonly] { background:#f6f6f6; }
+    .controls { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-top:8px; }
+    button { border:1px solid #ccc; background:#fff; padding:6px 10px; border-radius:4px; cursor:pointer; }
+    button:active { transform: translateY(1px); }
+    label { font-size: 13px; user-select:none; }
+    .status { font-size:12px; margin-left:auto; }
+    .ok { color:#117a37; }
+    .err { color:#b00020; }
+    details { font-size: 13px; }
+    table { width:100%; border-collapse: collapse; margin-top:6px; }
+    th, td { border:1px solid #ddd; padding:4px 6px; font-size:12.5px; vertical-align: top; }
+    th { background:#f0f0f0; text-align:left; }
+    code.k { font-family: var(--mono); }
+    .hint { color:#666; font-size:12px; margin-top:6px; }
+  </style>
+</head>
+<body>
+  <h1>sp_executesql 展開ツール</h1>
+  <p style="margin-top:0;">Profilerで取得した <code class="k">exec sp_executesql N'...'</code> を貼り付けて「変換」ボタンを押すことで、パラメータ埋込済の生SQLを生成します。</p>
+
+  <div class="row">
+    <section class="box">
+      <h2>入力（sp_executesql 全文）</h2>
+      <textarea id="input" spellcheck="false" placeholder="ここに sp_executesql を貼り付けてください"></textarea>
+      <div class="controls">
+        <label title="IN (@var) のとき、@var が 'a,b,c' なら IN ('a','b','c') に展開します。">
+          <input type="checkbox" id="expandCsv" checked> IN句でカンマ区切りを展開
+        </label>
+        <span id="msg" class="status"></span>
+      </div>
+      <details style="margin-top:6px;">
+        <summary>使い方 / 注意</summary>
+        <ul style="margin:6px 0 0 18px; padding:0;">
+          <li>日本語名パラメータ、<code class="k">nvarchar/nchar</code> の <code class="k">N'...'</code>、数値、日付系に対応。</li>
+          <li>このツールは<b>文字列置換ベース</b>です。極端なエッジケース（コメント中の <code class="k">@var</code>、複雑なネスト等）は対象外。</li>
+        </ul>
+      </details>
+    </section>
+
+    <section class="box">
+      <h2>出力（埋め込み済みSQL）</h2>
+      <textarea id="output" spellcheck="false" readonly placeholder="ここに展開後のSQLが出力されます"></textarea>
+      <div class="controls">
+        <button id="convert">変換</button>
+        <button id="copy">コピー</button>
+        <button id="clear">クリア</button>
+        <span id="msg2" class="status"></span>
+      </div>
+      <details style="margin-top:6px;">
+        <summary>解析したパラメータを見る</summary>
+        <div id="paramView" class="hint"></div>
+      </details>
+    </section>
+  </div>
+
+<script>
+(() => {
+  const $ = sel => document.querySelector(sel);
+  const input = $('#input');
+  const output = $('#output');
+  const msg = $('#msg');
+  const msg2 = $('#msg2');
+  const expandCsv = $('#expandCsv');
+  const paramView = $('#paramView');
+
+  // --- Helpers ---------------------------------------------------------------
+  const escapeRegex = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const sqlEscape = s => String(s).replace(/'/g, "''");
+
+  function splitTopLevel(str, delim=',') {
+    const parts = [];
+    let buf = '', depth = 0, inQ = false;
+    for (let i = 0; i < str.length; i++) {
+      const c = str[i], n = str[i+1];
+      if (c === "'" && n === "'") { buf += "''"; i++; continue; }
+      if (c === "'") { inQ = !inQ; buf += c; continue; }
+      if (!inQ) {
+        if (c === '(') { depth++; buf += c; continue; }
+        if (c === ')') { depth = Math.max(0, depth-1); buf += c; continue; }
+        if (c === delim && depth === 0) { parts.push(buf.trim()); buf=''; continue; }
+      }
+      buf += c;
+    }
+    if (buf.trim()) parts.push(buf.trim());
+    return parts;
+  }
+
+  function findNextNQuote(src, start) {
+    for (let i = start; i < src.length - 1; i++) {
+      const c = src[i];
+      if ((c === 'n' || c === 'N') && src[i+1] === "'") return i;
+    }
+    return -1;
+  }
+
+  // ※ ここでだけ '' → ' の復元を行う（二重適用しない）
+  function extractNString(src, startIdx) {
+    const start = findNextNQuote(src, startIdx);
+    if (start < 0) return null;
+    let i = start + 2;
+    let out = '';
+    while (i < src.length) {
+      const c = src[i];
+      const n = src[i+1];
+      if (c === "'" && n === "'") { out += "'"; i += 2; continue; }
+      if (c === "'") { i++; break; }
+      out += c;
+      i++;
+    }
+    return { text: out, end: i };
+  }
+
+  function parseExec(text) {
+    const lower = text.toLowerCase();
+    const at = lower.indexOf('exec sp_executesql');
+    if (at < 0) throw new Error('exec sp_executesql が見つかりません。');
+
+    const s1 = extractNString(text, at);
+    if (!s1) throw new Error('最初の N\'...\'（SQLテキスト）が見つかりません。');
+
+    const s2 = extractNString(text, s1.end);
+    if (!s2) throw new Error('2つ目の N\'...\'（パラメータ宣言部）が見つかりません。');
+
+    let rest = text.slice(s2.end).trim();
+    if (rest.startsWith(',')) rest = rest.slice(1).trim();
+
+    return { sqlLiteral: s1.text, declLiteral: s2.text, assigns: rest };
+  }
+
+  function typeKind(sqlType) {
+    const t = sqlType.toLowerCase().trim();
+    if (/(^|[^a-z])(n?varchar|n?char|n?text)/.test(t)) return t.startsWith('n') ? 'nstring' : 'string';
+    if (/(uniqueidentifier)/.test(t)) return 'string';
+    if (/(date|time|datetime2|datetimeoffset|smalldatetime|datetime)\b/.test(t)) return 'date';
+    if (/\b(bit|tinyint|smallint|int|bigint|decimal|numeric|money|smallmoney|float|real)\b/.test(t)) return 'number';
+    return 'unknown';
+  }
+
+  function parseDecls(declLiteral) {
+    const map = new Map();
+    const items = splitTopLevel(declLiteral, ',');
+    for (const it of items) {
+      if (!it) continue;
+      const m = it.match(/^\s*(@[^\s,]+)\s+(.+?)\s*$/u);
+      if (!m) continue;
+      const name = m[1];
+      const typ = m[2];
+      map.set(name, { type: typ.trim(), kind: typeKind(typ) });
+    }
+    return map;
+  }
+
+  function stripOuterQuotes(val) {
+    let v = val.trim();
+    let hadQuotes = false, nPrefix = false;
+    if (/^N'[\s\S]*'$/.test(v) || /^n'[\s\S]*'$/.test(v)) { nPrefix = true; hadQuotes = true; v = v.slice(2, -1); }
+    else if (/^'[\s\S]*'$/.test(v)) { hadQuotes = true; v = v.slice(1, -1); }
+    v = v.replace(/''/g, "'");
+    return { value: v, hadQuotes, nPrefix };
+  }
+
+  function parseAssigns(assigns, decls) {
+    const parts = splitTopLevel(assigns, ',');
+    const map = new Map();
+    for (const p of parts) {
+      if (!p) continue;
+      const m = p.match(/^\s*(@[^=\s]+)\s*=\s*([\s\S]+?)\s*$/u);
+      if (!m) continue;
+      const name = m[1];
+      let rhs = m[2].trim();
+
+      const decl = decls.get(name);
+      const kind = decl ? decl.kind : 'unknown';
+
+      if (kind === 'number') {
+        const { value } = stripOuterQuotes(rhs);
+        map.set(name, { raw: value, kind, items: null });
+      } else if (kind === 'date') {
+      const { value } = stripOuterQuotes(rhs);
+        map.set(name, { raw: value, kind, items: null });
+      } else {
+        const { value } = stripOuterQuotes(rhs);
+        map.set(name, { raw: value, kind: (kind === 'unknown' ? 'string' : kind), items: null });
+      }
+    }
+    return map;
+  }
+
+  function buildLiteral(val, kind) {
+    if (kind === 'number') return String(val);
+    if (kind === 'date') return `'${sqlEscape(val)}'`;
+    if (kind === 'nstring') return `N'${sqlEscape(val)}'`;
+    return `'${sqlEscape(val)}'`;
+  }
+
+  function replaceParamsInSql(sqlRaw, decls, assigns, options) {
+    let sql = sqlRaw;
+
+    // IN (@param) のCSV展開（文字列系のみ）
+    if (options.expandCsv) {
+      for (const [name, info] of assigns.entries()) {
+        const decl = decls.get(name);
+        const k = decl ? decl.kind : info.kind;
+        if (k === 'string' || k === 'nstring') {
+          const items = info.raw.includes(',') ? info.raw.split(',').map(s => s.trim()).filter(Boolean) : null;
+          if (items && items.length > 1) {
+            const litList = items.map(v => buildLiteral(v, k)).join(', ');
+            const pattern = new RegExp(`IN\\s*\\(\\s*${escapeRegex(name)}\\s*\\)`, 'gi');
+            sql = sql.replace(pattern, `IN (${litList})`);
+          }
+        }
+      }
+    }
+
+    // 汎用置換
+    for (const [name, info] of assigns.entries()) {
+      const decl = decls.get(name);
+      const k = decl ? decl.kind : info.kind;
+      const lit = buildLiteral(info.raw, k);
+      sql = sql.split(name).join(lit);
+    }
+
+    return sql.trim();
+  }
+
+  function convert(text, opts) {
+    const { sqlLiteral, declLiteral, assigns } = parseExec(text);
+    const decls = parseDecls(declLiteral);
+    const assignsMap = parseAssigns(assigns, decls);
+
+    renderParamTable(decls, assignsMap);
+
+    // ★ 二重クォート復元は extractNString で済み。ここではそのまま使用。
+    const sqlText = sqlLiteral;
+
+    const result = replaceParamsInSql(sqlText, decls, assignsMap, opts);
+    return result;
+  }
+
+  function renderParamTable(decls, assigns) {
+    const rows = [];
+    for (const [name, d] of decls.entries()) {
+      const a = assigns.get(name);
+      rows.push({ name, type: d.type, kind: d.kind, value: a ? a.raw : '(未割当)' });
+    }
+    if (!rows.length) { paramView.innerHTML = '<div class="hint">パラメータ宣言が見つかりませんでした。</div>'; return; }
+    const html = [
+      '<table>',
+      '<thead><tr><th>名前</th><th>型</th><th>分類</th><th>値（Raw）</th></tr></thead>',
+      '<tbody>',
+      ...rows.map(r => `<tr><td><code class="k">${r.name}</code></td><td>${r.type}</td><td>${r.kind}</td><td><code class="k">${escapeHtml(r.value)}</code></td></tr>`),
+      '</tbody></table>'
+    ].join('');
+    paramView.innerHTML = html;
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  // --- Wire up ----------------------------------------------------------------
+  $('#convert').addEventListener('click', () => {
+    msg.textContent = ''; msg2.textContent = '';
+    try {
+      const res = convert(input.value, { expandCsv: expandCsv.checked });
+      output.value = res;
+      msg2.textContent = '生成成功';
+      msg2.className = 'status ok';
+    } catch (e) {
+      output.value = '';
+      msg2.textContent = e.message || '変換に失敗しました。';
+      msg2.className = 'status err';
+    }
+  });
+
+  $('#copy').addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(output.value);
+      msg2.textContent = 'コピーしました';
+      msg2.className = 'status ok';
+    } catch {
+      msg2.textContent = 'コピーに失敗';
+      msg2.className = 'status err';
+    }
+  });
+
+  $('#clear').addEventListener('click', () => {
+    input.value = '';
+    output.value = '';
+    paramView.innerHTML = '';
+    msg.textContent = ''; msg2.textContent = '';
+  });
+
+  // 初期値
+  input.value = ``;
+})();
+</script>
+</body>
+</html>
