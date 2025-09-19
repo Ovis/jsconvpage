@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>重複行削除ツール</title>
+  <style>
+    body { font-family: sans-serif; margin: 20px; }
+    textarea { width: 100%; box-sizing: border-box; }
+    #inputText { height: 200px; }
+    #output { height: 200px; }
+    .result { margin-top: 15px; }
+    label, select { margin-top: 10px; display: inline-block; }
+    button { margin-right: 5px; }
+    #copyMessage { margin: 10px 0; color: green; font-weight: bold; display: none; }
+    pre { background: #f5f5f5; padding: 10px; border: 1px solid #ccc; white-space: pre-wrap; }
+    #duplicatesSection { display: none; }
+  </style>
+</head>
+<body>
+  <h1>重複行削除ツール</h1>
+  <p>テキストエリアに文字列を入力してください。</p>
+  <textarea id="inputText" placeholder="ここにテキストを入力"></textarea><br><br>
+
+  <label>並び替え方法:
+    <select id="sortOption">
+      <option value="original">元の順番</option>
+      <option value="original-reverse">元の順番を逆に</option>
+      <option value="asc">五十音順（昇順）</option>
+      <option value="desc">五十音順（降順）</option>
+      <option value="len-asc">文字数順（昇順）</option>
+      <option value="len-desc">文字数順（降順）</option>
+    </select>
+  </label>
+  <br><br>
+  <button onclick="removeDuplicates()">重複行を削除</button>
+  <button onclick="copyResult()">コピー</button>
+  <button onclick="clearAll()">クリア</button>
+
+  <div id="copyMessage">コピーしました！</div>
+
+  <div class="result">
+    <h2>結果</h2>
+    <textarea id="output" readonly></textarea>
+    <p id="stats"></p>
+
+    <div id="duplicatesSection">
+      <h3>削除されたもの</h3>
+      <pre id="duplicates"></pre>
+    </div>
+  </div>
+
+  <script>
+    function removeDuplicates() {
+      const input = document.getElementById("inputText").value;
+      const lines = input.split(/\r?\n/).filter(line => line.trim() !== "");
+
+      const seen = new Set();
+      const unique = [];
+      const duplicates = new Set();
+
+      for (const line of lines) {
+        if (seen.has(line)) {
+          duplicates.add(line);
+        } else {
+          seen.add(line);
+          unique.push(line);
+        }
+      }
+
+      const option = document.getElementById("sortOption").value;
+      switch (option) {
+        case "asc":
+          unique.sort((a, b) => a.localeCompare(b, "ja"));
+          break;
+        case "desc":
+          unique.sort((a, b) => b.localeCompare(a, "ja"));
+          break;
+        case "len-asc":
+          unique.sort((a, b) => a.length - b.length || a.localeCompare(b, "ja"));
+          break;
+        case "len-desc":
+          unique.sort((a, b) => b.length - a.length || a.localeCompare(b, "ja"));
+          break;
+        case "original-reverse":
+          unique.reverse();
+          break;
+        case "original":
+        default:
+          break;
+      }
+
+      const beforeCount = lines.length;
+      const afterCount = unique.length;
+      const removedCount = beforeCount - afterCount;
+
+      document.getElementById("output").value = unique.join("\n");
+      document.getElementById("stats").innerHTML =
+        `削除した行数：${removedCount}行<br>` +
+        `削除前行数：${beforeCount}行<br>` +
+        `削除後行数：${afterCount}行`;
+
+      const dupList = Array.from(duplicates);
+      if (dupList.length > 0) {
+        document.getElementById("duplicates").textContent = dupList.join("\n");
+        document.getElementById("duplicatesSection").style.display = "block";
+      } else {
+        document.getElementById("duplicatesSection").style.display = "none";
+      }
+    }
+
+    async function copyResult() {
+      const output = document.getElementById("output");
+      if (output.value.trim() === "") return;
+
+      try {
+        await navigator.clipboard.writeText(output.value);
+        showCopyMessage();
+      } catch (err) {
+        console.error("コピー失敗:", err);
+      }
+    }
+
+    function showCopyMessage() {
+      const msg = document.getElementById("copyMessage");
+      msg.style.display = "block";
+      setTimeout(() => { msg.style.display = "none"; }, 2000);
+    }
+
+    function clearAll() {
+      document.getElementById("inputText").value = "";
+      document.getElementById("output").value = "";
+      document.getElementById("stats").textContent = "";
+      document.getElementById("duplicates").textContent = "";
+      document.getElementById("copyMessage").style.display = "none";
+      document.getElementById("duplicatesSection").style.display = "none"; // 非表示に戻す
+    }
+  </script>
+</body>
+</html>
