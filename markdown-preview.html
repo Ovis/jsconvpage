@@ -1,0 +1,522 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <title>Markdown Preview</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    header {
+      padding: 8px 12px;
+      border-bottom: 1px solid #ddd;
+      font-size: 14px;
+      background: #f8f8f8;
+    }
+
+    #toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      padding: 6px 12px;
+      border-bottom: 1px solid #ddd;
+      background: #fafafa;
+      font-size: 13px;
+      align-items: center;
+    }
+
+    #toolbar button {
+      padding: 4px 8px;
+      border-radius: 4px;
+      border: 1px solid #ccc;
+      background: #fff;
+      cursor: pointer;
+      font-size: 13px;
+    }
+
+    #toolbar button:hover {
+      background: #f0f0f0;
+    }
+
+    #toolbar span {
+      font-size: 12px;
+      color: #666;
+      margin-left: auto;
+    }
+
+    main {
+      flex: 1;
+      display: flex;
+      min-height: 0;
+    }
+
+    #editor,
+    #preview {
+      width: 50%;
+      padding: 8px;
+      box-sizing: border-box;
+    }
+
+    /* エディタ側: 背景色＋スクロール抑制＋flex */
+    #editor {
+      border-right: 1px solid #ddd;
+      overflow: hidden;        /* 二重スクロール防止 */
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      background: #f5f7fb;
+    }
+
+    /* プレビュー側: ラベル＋中身を縦並び */
+    #preview {
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      background: #fff;
+    }
+
+    .pane-header {
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+      color: #64748b;
+      margin-bottom: 4px;
+    }
+
+    /* テキストエリアの見た目 */
+    #markdown-input {
+      width: 100%;
+      flex: 1;
+      box-sizing: border-box;
+      border: 1px solid #cbd5e1;
+      border-radius: 6px;
+      padding: 10px 12px;
+      resize: none;
+      font-family: "Cascadia Code", "Consolas", "Menlo", "Monaco", monospace;
+      font-size: 14px;
+      line-height: 1.6;
+      outline: none;
+      background: #fcfcff;
+      box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.06);
+      overflow: auto; /* スクロールはテキストエリアに */
+    }
+
+    /* フォーカス時の強調 */
+    #markdown-input:focus {
+      border-color: #3b82f6;
+      box-shadow:
+        0 0 0 1px rgba(59, 130, 246, 0.25),
+        inset 0 1px 2px rgba(15, 23, 42, 0.06);
+      background: #ffffff;
+    }
+
+    #markdown-input::selection {
+      background: rgba(59, 130, 246, 0.25);
+    }
+
+    /* プレビューの中身（ここにHTMLを流し込む） */
+    #preview-content {
+      flex: 1;
+      overflow: auto;
+      background: #ffffff;
+      border-radius: 6px;
+      border: 1px solid #e2e8f0;
+      padding: 10px 12px;
+      box-sizing: border-box;
+    }
+
+    #preview-content h1,
+    #preview-content h2,
+    #preview-content h3 {
+      border-bottom: 1px solid #eee;
+      padding-bottom: 4px;
+      margin-top: 1.2em;
+    }
+
+    pre {
+      background: #f6f6f6;
+      padding: 8px;
+      overflow: auto;
+      border-radius: 4px;
+    }
+
+    code {
+      font-family: "Consolas", "Menlo", "Monaco", monospace;
+      font-size: 13px;
+    }
+
+    .mermaid {
+      margin: 12px 0;
+    }
+
+    .mermaid svg {
+      max-width: 100%;
+    }
+  </style>
+
+  <!-- marked.js -->
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+
+  <!-- highlight.js -->
+  <link
+    rel="stylesheet"
+    href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/default.min.css"
+  />
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.11.1/build/highlight.min.js"></script>
+
+  <!-- mermaid.js -->
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+</head>
+<body>
+  <header>
+    Markdown プレビュー（左：Markdown / 右：レンダリング結果）
+  </header>
+
+  <div id="toolbar">
+    <button id="open-md-button">Markdownを開く</button>
+    <input
+      type="file"
+      id="open-md-input"
+      accept=".md,text/markdown,text/plain"
+      style="display:none"
+    />
+
+    <button id="download-md-button">Markdownをダウンロード</button>
+    <button id="download-html-button">HTMLをダウンロード</button>
+
+    <button id="copy-md-button">Markdownをコピー</button>
+    <button id="copy-html-button">HTMLをコピー</button>
+
+    <button id="clear-md-button">Markdownをクリア</button>
+
+    <span>自動保存: ローカルストレージ</span>
+  </div>
+
+  <main>
+    <section id="editor">
+      <div class="pane-header">Markdown</div>
+      <textarea id="markdown-input"></textarea>
+    </section>
+    <section id="preview">
+      <div class="pane-header">Preview</div>
+      <div id="preview-content"></div>
+    </section>
+  </main>
+
+  <script>
+    // Mermaid 初期化
+    mermaid.initialize({
+      startOnLoad: false,
+      theme: "default"
+    });
+
+    const LOCAL_STORAGE_KEY = "md-editor-content";
+
+    function escapeHtml(str) {
+      str = (str ?? "").toString();
+      return str.replace(/[&<>"']/g, function (ch) {
+        switch (ch) {
+          case "&": return "&amp;";
+          case "<": return "&lt;";
+          case ">": return "&gt;";
+          case '"': return "&quot;";
+          case "'": return "&#39;";
+          default: return ch;
+        }
+      });
+    }
+
+    // marked 用レンダラー（highlight.js 丸投げ＋フォールバック）
+    const renderer = new marked.Renderer();
+
+    renderer.code = function (code, infostring, escaped) {
+      let text = "";
+      let lang = "";
+
+      // 新しい marked では token オブジェクトが来ることがある
+      if (code && typeof code === "object" && "text" in code) {
+        const token = code;
+        text = (token.text ?? "").toString();
+        lang = (token.lang || "").toString().trim().toLowerCase();
+      } else {
+        // 古いシグネチャ (code: string, infostring: string) も一応サポート
+        text = (code ?? "").toString();
+        lang = (infostring || "").toString().trim().toLowerCase();
+      }
+
+      // ```mermaid``` はそのまま Mermaid 用の div に
+      if (lang === "mermaid") {
+        return '<div class="mermaid">\n' + text + '\n</div>';
+      }
+
+      // highlight.js が使えるなら丸投げ
+      if (typeof hljs !== "undefined" && hljs.highlightAuto) {
+        try {
+          let result;
+          if (lang && hljs.getLanguage(lang)) {
+            // 指定言語に対応している場合
+            result = hljs.highlight(text, { language: lang });
+          } else {
+            // 自動判定
+            result = hljs.highlightAuto(text);
+          }
+
+          const className = result.language
+            ? 'class="hljs language-' + result.language + '"'
+            : 'class="hljs"';
+
+          return '<pre><code ' + className + '>' + result.value + '</code></pre>\n';
+        } catch (e) {
+          console.warn("highlight.js error, fallback to plain code:", e);
+          // 下のフォールバックへ
+        }
+      } else {
+        console.warn("hljs is not available, fallback to plain code");
+      }
+
+      // フォールバック: 単純にエスケープしたコードを表示
+      return '<pre><code>' + escapeHtml(text) + '</code></pre>\n';
+    };
+
+    marked.setOptions({
+      renderer,
+      gfm: true,
+      breaks: true
+    });
+
+    const input = document.getElementById("markdown-input");
+    const preview = document.getElementById("preview-content");
+
+    const openMdButton = document.getElementById("open-md-button");
+    const openMdInput = document.getElementById("open-md-input");
+    const downloadMdButton = document.getElementById("download-md-button");
+    const downloadHtmlButton = document.getElementById("download-html-button");
+    const copyMdButton = document.getElementById("copy-md-button");
+    const copyHtmlButton = document.getElementById("copy-html-button");
+    const clearMdButton = document.getElementById("clear-md-button");
+
+    const initialText = '# Markdown Preview\n\n'
+      + '左側に Markdown を入力すると、右側にレンダリング結果が表示されます。\n\n'
+      + '- 自動保存（localStorage）\n'
+      + '- ファイル読み込み（.md / text）\n'
+      + '- Markdownダウンロード、HTMLダウンロード\n'
+      + '- Markdownコピー、HTMLコピー\n'
+      + '- スクロール同期\n'
+      + '- Mermaid / highlight.js 対応\n\n'
+      + '## コードブロック\n\n'
+      + '```csharp\n'
+      + 'public class Hello {\n'
+      + '    public static void Main() {\n'
+      + '        Console.WriteLine("Hello, world");\n'
+      + '    }\n'
+      + '}\n'
+      + '```\n\n'
+      + '## Mermaid 図\n\n'
+      + '```mermaid\n'
+      + 'graph TD\n'
+      + '    A[スタート] --> B{条件}\n'
+      + '    B -->|はい| C[処理1]\n'
+      + '    B -->|いいえ| D[処理2]\n'
+      + '    C --> E[終了]\n'
+      + '    D --> E\n'
+      + '```\n';
+
+    function loadFromLocalStorage() {
+      try {
+        const saved = localStorage.getItem(LOCAL_STORAGE_KEY);
+        if (saved !== null) {
+          input.value = saved;
+          return;
+        }
+      } catch (e) {
+        console.warn("localStorage read error:", e);
+      }
+      input.value = initialText;
+    }
+
+    function saveToLocalStorage() {
+      try {
+        localStorage.setItem(LOCAL_STORAGE_KEY, input.value);
+      } catch (e) {
+        console.warn("localStorage write error:", e);
+      }
+    }
+
+    function render() {
+      const markdown = input.value;
+      const html = marked.parse(markdown);
+      preview.innerHTML = html;
+
+      // ここでは highlightElement は呼ばない（renderer.code で済ませる）
+      mermaid.run({ querySelector: ".mermaid" });
+    }
+
+    // スクロール同期
+    let isSyncingEditorScroll = false;
+    let isSyncingPreviewScroll = false;
+
+    function syncScroll(source, target) {
+      if (!source || !target) return;
+      const sourceScrollTop = source.scrollTop;
+      const sourceScrollHeight = source.scrollHeight - source.clientHeight;
+      const targetScrollHeight = target.scrollHeight - target.clientHeight;
+
+      const ratio = sourceScrollHeight > 0
+        ? sourceScrollTop / sourceScrollHeight
+        : 0;
+
+      target.scrollTop = ratio * targetScrollHeight;
+    }
+
+    // テキストエリア側のスクロールで同期
+    input.addEventListener("scroll", () => {
+      if (isSyncingEditorScroll) return;
+      isSyncingPreviewScroll = true;
+      syncScroll(input, preview);
+      isSyncingPreviewScroll = false;
+    });
+
+    // プレビュー側のスクロールで同期
+    preview.addEventListener("scroll", () => {
+      if (isSyncingPreviewScroll) return;
+      isSyncingEditorScroll = true;
+      syncScroll(preview, input);
+      isSyncingEditorScroll = false;
+    });
+
+    // 入力イベント
+    input.addEventListener("input", () => {
+      render();
+      saveToLocalStorage();
+    });
+
+    // ファイル読み込み
+    openMdButton.addEventListener("click", () => {
+      openMdInput.value = "";
+      openMdInput.click();
+    });
+
+    openMdInput.addEventListener("change", (e) => {
+      const file = e.target.files && e.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = (evt) => {
+        input.value = evt.target.result || "";
+        render();
+        saveToLocalStorage();
+      };
+      reader.readAsText(file, "utf-8");
+    });
+
+    // Markdownダウンロード
+    downloadMdButton.addEventListener("click", () => {
+      const blob = new Blob([input.value], { type: "text/markdown;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "document.md";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    });
+
+    // HTMLダウンロード（build/highlight.min.js を使用）
+    downloadHtmlButton.addEventListener("click", () => {
+      const contentHtml = preview.innerHTML;
+      const htmlContent =
+        '<!DOCTYPE html>\n'
+        + '<html lang="ja">\n'
+        + '<head>\n'
+        + '  <meta charset="UTF-8" />\n'
+        + '  <title>Exported Markdown Preview</title>\n'
+        + '  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/default.min.css">\n'
+        + '  <style>\n'
+        + '    body { font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; padding: 16px; }\n'
+        + '    pre { background: #f6f6f6; padding: 8px; overflow: auto; border-radius: 4px; }\n'
+        + '    code { font-family: "Consolas", "Menlo", "Monaco", monospace; font-size: 13px; }\n'
+        + '    .mermaid svg { max-width: 100%; }\n'
+        + '  </style>\n'
+        + '  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"><\/script>\n'
+        + '  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.11.1/build/highlight.min.js"><\/script>\n'
+        + '</head>\n'
+        + '<body>\n'
+        + '<div id="content">\n'
+        + contentHtml + '\n'
+        + '</div>\n'
+        + '<script>\n'
+        + '  mermaid.initialize({ startOnLoad: true, theme: "default" });\n'
+        + '  document.querySelectorAll("pre code").forEach(function (block) { hljs.highlightElement(block); });\n'
+        + '<\/script>\n'
+        + '</body>\n'
+        + '</html>\n';
+
+      const blob = new Blob([htmlContent], { type: "text/html;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "document.html";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    });
+
+    // クリップボードコピー
+    async function copyToClipboard(text) {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        try {
+          await navigator.clipboard.writeText(text);
+          return;
+        } catch (e) {
+          console.warn("clipboard.writeText failed", e);
+        }
+      }
+      const textarea = document.createElement("textarea");
+      textarea.value = text;
+      textarea.style.position = "fixed";
+      textarea.style.left = "-1000px";
+      textarea.style.top = "-1000px";
+      document.body.appendChild(textarea);
+      textarea.focus();
+      textarea.select();
+      try {
+        document.execCommand("copy");
+      } catch (e) {
+        console.warn("execCommand(\"copy\") failed", e);
+      }
+      document.body.removeChild(textarea);
+    }
+
+    copyMdButton.addEventListener("click", () => {
+      copyToClipboard(input.value);
+    });
+
+    copyHtmlButton.addEventListener("click", () => {
+      copyToClipboard(preview.innerHTML);
+    });
+
+    // クリア
+    clearMdButton.addEventListener("click", () => {
+      if (!confirm("クリアします。よろしいですか？")) {
+        return;
+      }
+      input.value = "";
+      render();
+      saveToLocalStorage();
+      input.focus();
+    });
+
+    // 初期化
+    loadFromLocalStorage();
+    render();
+  </script>
+</body>
+</html>
