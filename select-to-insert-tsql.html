@@ -1,0 +1,1011 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SELECT文からINSERT文生成用T-SQLを作成</title>
+  <style>
+    :root {
+      --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    }
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans JP", "Hiragino Kaku Gothic ProN", Meiryo, sans-serif;
+      padding: 16px;
+      line-height: 1.6;
+      background: #fff;
+      color: #222;
+    }
+    h1 {
+      margin: 0 0 8px;
+      font-size: 20px;
+    }
+    p {
+      margin: 0 0 12px;
+    }
+    .row {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 12px;
+    }
+    @media (min-width: 980px) {
+      .row {
+        grid-template-columns: 1fr 1fr;
+      }
+    }
+    .box {
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      padding: 10px;
+      background: #fafafa;
+    }
+    .box h2 {
+      margin: 4px 2px 8px;
+      font-size: 14px;
+    }
+    textarea {
+      width: 100%;
+      min-height: 320px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      padding: 8px;
+      font: 12.5px/1.5 var(--mono);
+      resize: vertical;
+    }
+    textarea[readonly] {
+      background: #f6f6f6;
+    }
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      margin-top: 8px;
+    }
+    button {
+      border: 1px solid #ccc;
+      background: #fff;
+      padding: 6px 10px;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    button:active {
+      transform: translateY(1px);
+    }
+    label {
+      font-size: 13px;
+      user-select: none;
+    }
+    .status {
+      font-size: 12px;
+      margin-left: auto;
+    }
+    .ok {
+      color: #117a37;
+    }
+    .err {
+      color: #b00020;
+    }
+    .error-box {
+      display: none;
+      margin: 0 0 12px;
+      padding: 10px 12px;
+      border: 1px solid #f3b7c1;
+      border-radius: 6px;
+      background: #fff3f5;
+      color: #b00020;
+      font-size: 13px;
+    }
+    .error-box.is-visible {
+      display: block;
+    }
+    .notes {
+      margin: 12px 0 0;
+      padding-left: 18px;
+      font-size: 13px;
+    }
+    .notes li + li {
+      margin-top: 4px;
+    }
+    .hint {
+      color: #666;
+      font-size: 12px;
+      margin-top: 6px;
+    }
+    code.k {
+      font-family: var(--mono);
+    }
+  </style>
+</head>
+<body>
+  <h1>SELECT文からINSERT文生成用T-SQLを作成</h1>
+  <p>単一テーブル向けのSELECT文から、SSMSで実行するとINSERT文一覧を返す完成形T-SQLを生成します。</p>
+
+  <div id="errorBox" class="error-box" role="alert"></div>
+
+  <div class="row">
+    <section class="box">
+      <h2>入力（SELECT文）</h2>
+      <textarea
+        id="input"
+        spellcheck="false"
+        placeholder="SELECT *
+FROM dbo.Users
+WHERE UserId = '012930'
+ORDER BY UserId DESC;"></textarea>
+      <div class="controls">
+        <label>
+          <input type="checkbox" id="includeIdentity" />
+          IDENTITY列を含める
+        </label>
+        <span id="inputStatus" class="status"></span>
+      </div>
+      <ul class="notes">
+        <li>対応構文は <code class="k">SELECT ... FROM ... [WHERE ...] [ORDER BY ...]</code> のみです。</li>
+        <li>単一テーブルのみ対応します。JOIN、サブクエリ、CTE、GROUP BY、HAVING、UNION系、OPTION、TOP、DISTINCTは非対応です。</li>
+        <li><code class="k">*</code> または単純なカラム名列挙のみ対応します。AS、関数、修飾付きカラム名は非対応です。</li>
+        <li>テーブル名は <code class="k">Users</code> または <code class="k">dbo.Users</code> まで対応します。</li>
+        <li>角括弧付き識別子は対応しますが、空白入り識別子やダブルクォート識別子は非対応です。</li>
+        <li>ORDER BY は単純なカラム名と <code class="k">ASC</code> / <code class="k">DESC</code> のみ対応します。</li>
+        <li>コメント、複数SQL文、テーブルヒントは非対応です。</li>
+      </ul>
+    </section>
+
+    <section class="box">
+      <h2>出力（実行用T-SQL）</h2>
+      <textarea
+        id="output"
+        spellcheck="false"
+        readonly
+        placeholder="ここに生成されたT-SQLが出力されます"></textarea>
+      <div class="controls">
+        <button id="generate">生成</button>
+        <button id="copy">コピー</button>
+        <span id="outputStatus" class="status"></span>
+      </div>
+      <div class="hint">生成結果をSSMSで実行すると、結果セットとしてINSERT文が1行ずつ返ります。</div>
+    </section>
+  </div>
+
+  <script>
+    (() => {
+      const input = document.getElementById('input');
+      const output = document.getElementById('output');
+      const includeIdentity = document.getElementById('includeIdentity');
+      const generateButton = document.getElementById('generate');
+      const copyButton = document.getElementById('copy');
+      const inputStatus = document.getElementById('inputStatus');
+      const outputStatus = document.getElementById('outputStatus');
+      const errorBox = document.getElementById('errorBox');
+
+      const SIMPLE_IDENTIFIER_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+      const BRACKET_IDENTIFIER_RE = /^\[([A-Za-z_][A-Za-z0-9_]*)\]$/;
+
+      generateButton.addEventListener('click', () => {
+        clearError();
+        inputStatus.textContent = '';
+        outputStatus.textContent = '';
+        outputStatus.className = 'status';
+
+        try {
+          const parsed = parseSelect(input.value);
+          output.value = buildTsql(parsed, includeIdentity.checked);
+          inputStatus.textContent = '生成対象のSELECT文を解析しました';
+          inputStatus.className = 'status ok';
+        } catch (error) {
+          output.value = '';
+          showError(error.message || 'SELECT文の解析に失敗しました。');
+          inputStatus.textContent = '解析エラー';
+          inputStatus.className = 'status err';
+        }
+      });
+
+      copyButton.addEventListener('click', async () => {
+        outputStatus.textContent = '';
+        outputStatus.className = 'status';
+
+        if (!output.value) {
+          outputStatus.textContent = 'コピー対象がありません';
+          outputStatus.className = 'status err';
+          return;
+        }
+
+        try {
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(output.value);
+          } else {
+            fallbackCopy(output.value);
+          }
+          outputStatus.textContent = 'コピーしました';
+          outputStatus.className = 'status ok';
+        } catch (error) {
+          outputStatus.textContent = 'コピーに失敗';
+          outputStatus.className = 'status err';
+        }
+      });
+
+      function parseSelect(sqlText) {
+        const text = normalizeInput(sqlText);
+        if (!text) {
+          throw new Error('SELECT文を入力してください。');
+        }
+
+        const masked = maskSql(text);
+        ensureNoComments(masked);
+        const statement = stripTrailingSemicolon(text, masked);
+        const statementMasked = maskSql(statement);
+
+        if (!/^\s*SELECT\b/i.test(statementMasked)) {
+          throw new Error('SELECT文のみ対応しています。');
+        }
+
+        const words = scanTopLevelWords(statementMasked);
+        if (!words.length || words[0].word !== 'SELECT') {
+          throw new Error('SELECT文のみ対応しています。');
+        }
+
+        const selectWord = words[0];
+        const fromWord = words.find((word) => word.word === 'FROM' && word.index > selectWord.index);
+        if (!fromWord) {
+          throw new Error('FROM句が見つかりません。');
+        }
+
+        const whereWord = words.find((word) => word.word === 'WHERE' && word.index > fromWord.index) || null;
+        const orderPair = findOrderByPair(words, fromWord.index);
+
+        if (orderPair && whereWord && orderPair.order.index < whereWord.index) {
+          throw new Error('WHERE句の前にORDER BYを置くことはできません。');
+        }
+
+        const selectPart = statement.slice(selectWord.end, fromWord.index).trim();
+        if (!selectPart) {
+          throw new Error('SELECT句が空です。');
+        }
+
+        const tableEndIndex = Math.min(
+          whereWord ? whereWord.index : statement.length,
+          orderPair ? orderPair.order.index : statement.length
+        );
+        const tablePart = statement.slice(fromWord.end, tableEndIndex).trim();
+        if (!tablePart) {
+          throw new Error('FROM句のテーブル名が見つかりません。');
+        }
+
+        const whereBody = whereWord
+          ? statement.slice(whereWord.end, orderPair ? orderPair.order.index : statement.length).trim()
+          : '';
+        const orderBody = orderPair
+          ? statement.slice(orderPair.by.end, statement.length).trim()
+          : '';
+
+        validateTablePart(tablePart);
+        validateWherePart(whereBody);
+
+        const table = parseTableReference(tablePart);
+        const selectList = parseSelectList(selectPart);
+        const orderByItems = orderBody ? parseOrderBy(orderBody) : [];
+
+        return {
+          rawObjectName: table.schema ? `${table.schema}.${table.table}` : table.table,
+          selectAll: selectList.selectAll,
+          selectedColumns: selectList.columns,
+          whereClause: whereBody ? `WHERE ${whereBody}` : '',
+          windowOrderClause: orderByItems.length
+            ? `ORDER BY ${orderByItems.map(formatOrderItem).join(', ')}`
+            : 'ORDER BY (SELECT 1)'
+        };
+      }
+
+      function normalizeInput(sqlText) {
+        return String(sqlText || '')
+          .replace(/\r\n?/g, '\n')
+          .trim();
+      }
+
+      function maskSql(text) {
+        const chars = text.split('');
+        let inString = false;
+        let inBracket = false;
+
+        for (let i = 0; i < chars.length; i += 1) {
+          const char = chars[i];
+          const next = chars[i + 1];
+
+          if (inString) {
+            chars[i] = ' ';
+            if (char === "'" && next === "'") {
+              chars[i + 1] = ' ';
+              i += 1;
+            } else if (char === "'") {
+              inString = false;
+            }
+            continue;
+          }
+
+          if (inBracket) {
+            chars[i] = ' ';
+            if (char === ']') {
+              inBracket = false;
+            }
+            continue;
+          }
+
+          if (char === '"') {
+            throw new Error('ダブルクォート識別子には対応していません。');
+          }
+
+          if (char === "'") {
+            chars[i] = ' ';
+            inString = true;
+            continue;
+          }
+
+          if (char === '[') {
+            chars[i] = ' ';
+            inBracket = true;
+          }
+        }
+
+        if (inString) {
+          throw new Error('文字列リテラルが閉じていません。');
+        }
+
+        if (inBracket) {
+          throw new Error('角括弧識別子が閉じていません。');
+        }
+
+        return chars.join('');
+      }
+
+      function ensureNoComments(masked) {
+        if (/--|\/\*|\*\//.test(masked)) {
+          throw new Error('コメント付きSQLには対応していません。');
+        }
+      }
+
+      function stripTrailingSemicolon(text, masked) {
+        const semicolonIndexes = [];
+        for (let i = 0; i < masked.length; i += 1) {
+          if (masked[i] === ';') {
+            semicolonIndexes.push(i);
+          }
+        }
+
+        if (semicolonIndexes.length === 0) {
+          return text;
+        }
+
+        if (semicolonIndexes.length > 1) {
+          throw new Error('複数SQL文には対応していません。');
+        }
+
+        const semicolonIndex = semicolonIndexes[0];
+        if (text.slice(semicolonIndex + 1).trim() !== '') {
+          throw new Error('複数SQL文には対応していません。');
+        }
+
+        return text.slice(0, semicolonIndex).trimEnd();
+      }
+
+      function scanTopLevelWords(masked) {
+        const words = [];
+        let depth = 0;
+
+        for (let i = 0; i < masked.length; i += 1) {
+          const char = masked[i];
+
+          if (char === '(') {
+            depth += 1;
+            continue;
+          }
+
+          if (char === ')') {
+            depth = Math.max(0, depth - 1);
+            continue;
+          }
+
+          if (depth === 0 && /[A-Za-z_]/.test(char)) {
+            const start = i;
+            i += 1;
+            while (i < masked.length && /[A-Za-z0-9_]/.test(masked[i])) {
+              i += 1;
+            }
+            words.push({
+              word: masked.slice(start, i).toUpperCase(),
+              index: start,
+              end: i
+            });
+            i -= 1;
+          }
+        }
+
+        return words;
+      }
+
+      function findOrderByPair(words, fromIndex) {
+        for (let i = 0; i < words.length - 1; i += 1) {
+          if (
+            words[i].index > fromIndex &&
+            words[i].word === 'ORDER' &&
+            words[i + 1].word === 'BY'
+          ) {
+            return {
+              order: words[i],
+              by: words[i + 1]
+            };
+          }
+        }
+        return null;
+      }
+
+      function validateTablePart(tablePart) {
+        if (/[()]/.test(tablePart)) {
+          throw new Error('FROM句には単一テーブルのみ指定してください。');
+        }
+      }
+
+      function validateWherePart(whereBody) {
+        if (!whereBody) {
+          return;
+        }
+
+        const maskedWhere = maskSql(whereBody);
+        const blockedKeywords = [
+          'SELECT',
+          'FROM',
+          'JOIN',
+          'UNION',
+          'EXCEPT',
+          'INTERSECT',
+          'GROUP',
+          'HAVING',
+          'ORDER',
+          'OPTION',
+          'WITH'
+        ];
+
+        const words = scanAllWords(maskedWhere);
+        const found = words.find((word) => blockedKeywords.includes(word.word));
+        if (found) {
+          throw new Error(`WHERE句に未対応の構文が含まれています: ${found.word}`);
+        }
+      }
+
+      function scanAllWords(masked) {
+        const words = [];
+        for (let i = 0; i < masked.length; i += 1) {
+          if (/[A-Za-z_]/.test(masked[i])) {
+            const start = i;
+            i += 1;
+            while (i < masked.length && /[A-Za-z0-9_]/.test(masked[i])) {
+              i += 1;
+            }
+            words.push({
+              word: masked.slice(start, i).toUpperCase(),
+              index: start,
+              end: i
+            });
+            i -= 1;
+          }
+        }
+        return words;
+      }
+
+      function parseTableReference(tablePart) {
+        const parts = splitTopLevel(tablePart, '.');
+        if (parts.length < 1 || parts.length > 2) {
+          throw new Error('テーブル名は テーブル名 または スキーマ.テーブル名 のみ対応しています。');
+        }
+
+        const identifiers = parts.map((part) => parseIdentifier(part.trim()));
+        if (identifiers.some((identifier) => !identifier)) {
+          throw new Error('テーブル名の形式が不正です。');
+        }
+
+        if (identifiers.length === 1) {
+          return {
+            schema: null,
+            table: identifiers[0]
+          };
+        }
+
+        return {
+          schema: identifiers[0],
+          table: identifiers[1]
+        };
+      }
+
+      function parseSelectList(selectPart) {
+        if (selectPart === '*') {
+          return {
+            selectAll: true,
+            columns: []
+          };
+        }
+
+        const items = splitTopLevel(selectPart, ',');
+        if (!items.length) {
+          throw new Error('SELECT句が空です。');
+        }
+
+        if (items.some((item) => item.trim() === '*')) {
+          throw new Error('* と明示カラム指定の混在には対応していません。');
+        }
+
+        const columns = items.map((item) => {
+          const trimmed = item.trim();
+          if (/[()]/.test(trimmed)) {
+            throw new Error('SELECT句で関数や式は使用できません。');
+          }
+
+          const identifier = parseIdentifier(trimmed);
+          if (!identifier) {
+            throw new Error(`SELECT句に未対応のカラム指定があります: ${trimmed}`);
+          }
+          return identifier;
+        });
+
+        ensureNoDuplicateIdentifiers(columns, 'SELECT句');
+
+        return {
+          selectAll: false,
+          columns
+        };
+      }
+
+      function parseOrderBy(orderBody) {
+        const items = splitTopLevel(orderBody, ',');
+        if (!items.length) {
+          throw new Error('ORDER BY句が空です。');
+        }
+
+        return items.map((item) => {
+          const trimmed = item.trim();
+          const match = trimmed.match(/^(.+?)(?:\s+(ASC|DESC))?$/i);
+          if (!match) {
+            throw new Error(`ORDER BY句の形式が不正です: ${trimmed}`);
+          }
+
+          const identifier = parseIdentifier(match[1].trim());
+          if (!identifier) {
+            throw new Error(`ORDER BY句には単純なカラム名のみ指定してください: ${trimmed}`);
+          }
+
+          return {
+            name: identifier,
+            direction: match[2] ? match[2].toUpperCase() : ''
+          };
+        });
+      }
+
+      function parseIdentifier(text) {
+        const trimmed = text.trim();
+        const bracketMatch = trimmed.match(BRACKET_IDENTIFIER_RE);
+        if (bracketMatch) {
+          return bracketMatch[1];
+        }
+
+        if (SIMPLE_IDENTIFIER_RE.test(trimmed)) {
+          return trimmed;
+        }
+
+        return null;
+      }
+
+      function ensureNoDuplicateIdentifiers(names, label) {
+        const seen = new Set();
+        for (const name of names) {
+          const key = name.toUpperCase();
+          if (seen.has(key)) {
+            throw new Error(`${label}に重複カラムがあります: ${name}`);
+          }
+          seen.add(key);
+        }
+      }
+
+      function splitTopLevel(text, delimiter) {
+        const parts = [];
+        let current = '';
+        let depth = 0;
+        let inString = false;
+        let inBracket = false;
+
+        for (let i = 0; i < text.length; i += 1) {
+          const char = text[i];
+          const next = text[i + 1];
+
+          if (inString) {
+            current += char;
+            if (char === "'" && next === "'") {
+              current += next;
+              i += 1;
+            } else if (char === "'") {
+              inString = false;
+            }
+            continue;
+          }
+
+          if (inBracket) {
+            current += char;
+            if (char === ']') {
+              inBracket = false;
+            }
+            continue;
+          }
+
+          if (char === "'") {
+            current += char;
+            inString = true;
+            continue;
+          }
+
+          if (char === '[') {
+            current += char;
+            inBracket = true;
+            continue;
+          }
+
+          if (char === '(') {
+            depth += 1;
+            current += char;
+            continue;
+          }
+
+          if (char === ')') {
+            depth = Math.max(0, depth - 1);
+            current += char;
+            continue;
+          }
+
+          if (char === delimiter && depth === 0) {
+            parts.push(current.trim());
+            current = '';
+            continue;
+          }
+
+          current += char;
+        }
+
+        if (current.trim() !== '') {
+          parts.push(current.trim());
+        }
+
+        return parts;
+      }
+
+      function formatOrderItem(item) {
+        return item.direction
+          ? `${quoteIdentifier(item.name)} ${item.direction}`
+          : quoteIdentifier(item.name);
+      }
+
+      function quoteIdentifier(name) {
+        return `[${name}]`;
+      }
+
+      function toSqlNString(value) {
+        return `N'${String(value).replace(/'/g, "''")}'`;
+      }
+
+      function buildTsql(parsed, includeIdentityValue) {
+        const includeIdentityLiteral = includeIdentityValue ? '1' : '0';
+        const requestedColumnsBlock = parsed.selectAll
+          ? ''
+          : `INSERT INTO @RequestedColumns (ColumnName)\nVALUES\n    ${parsed.selectedColumns.map((column) => `(${toSqlNString(column)})`).join(',\n    ')};\n\n`;
+
+        return `DECLARE @InputObjectName nvarchar(300) = ${toSqlNString(parsed.rawObjectName)};
+DECLARE @IncludeIdentity bit = ${includeIdentityLiteral};
+DECLARE @WhereClause nvarchar(max) = ${toSqlNString(parsed.whereClause)};
+DECLARE @WindowOrderClause nvarchar(max) = ${toSqlNString(parsed.windowOrderClause)};
+DECLARE @ObjectId int;
+DECLARE @SchemaName sysname;
+DECLARE @TableName sysname;
+DECLARE @ResolvedFullTableName nvarchar(512);
+DECLARE @ColumnList nvarchar(max);
+DECLARE @ValueExpression nvarchar(max);
+DECLARE @Sql nvarchar(max);
+DECLARE @NeedIdentityInsert bit = 0;
+
+DECLARE @RequestedColumns TABLE (
+    ColumnName sysname NOT NULL PRIMARY KEY
+);
+
+${requestedColumnsBlock}DECLARE @SelectedColumns TABLE (
+    ColumnId int NOT NULL PRIMARY KEY,
+    ColumnName sysname NOT NULL,
+    TypeName sysname NOT NULL,
+    IsIdentity bit NOT NULL,
+    IsComputed bit NOT NULL,
+    IsRowversion bit NOT NULL,
+    IsNullable bit NOT NULL,
+    HasDefault bit NOT NULL,
+    IsUnsupported bit NOT NULL
+);
+
+SET @ObjectId = OBJECT_ID(@InputObjectName, N'U');
+
+IF @ObjectId IS NULL
+BEGIN
+    THROW 50000, '対象の物理テーブルを解決できません。', 1;
+END;
+
+SELECT
+    @SchemaName = s.name,
+    @TableName = t.name
+FROM sys.tables t
+JOIN sys.schemas s ON s.schema_id = t.schema_id
+WHERE t.object_id = @ObjectId;
+
+SET @ResolvedFullTableName = QUOTENAME(@SchemaName) + N'.' + QUOTENAME(@TableName);
+
+IF NOT EXISTS (SELECT 1 FROM @RequestedColumns)
+BEGIN
+    INSERT INTO @SelectedColumns (
+        ColumnId,
+        ColumnName,
+        TypeName,
+        IsIdentity,
+        IsComputed,
+        IsRowversion,
+        IsNullable,
+        HasDefault,
+        IsUnsupported
+    )
+    SELECT
+        c.column_id,
+        c.name,
+        ty.name,
+        c.is_identity,
+        c.is_computed,
+        CASE WHEN c.system_type_id = 189 THEN 1 ELSE 0 END,
+        c.is_nullable,
+        CASE WHEN dc.object_id IS NULL THEN 0 ELSE 1 END,
+        CASE
+            WHEN ty.is_user_defined = 1
+                OR ty.name IN (N'sql_variant', N'hierarchyid', N'geometry', N'geography')
+                THEN 1
+            ELSE 0
+        END
+    FROM sys.columns c
+    JOIN sys.types ty ON ty.user_type_id = c.user_type_id
+    LEFT JOIN sys.default_constraints dc
+        ON dc.parent_object_id = c.object_id
+        AND dc.parent_column_id = c.column_id
+    WHERE
+        c.object_id = @ObjectId
+        AND c.is_computed = 0
+        AND c.system_type_id <> 189
+        AND (@IncludeIdentity = 1 OR c.is_identity = 0)
+    ORDER BY c.column_id;
+END
+ELSE
+BEGIN
+    IF EXISTS (
+        SELECT 1
+        FROM @RequestedColumns rc
+        LEFT JOIN sys.columns c
+            ON c.object_id = @ObjectId
+            AND c.name = rc.ColumnName
+        WHERE c.column_id IS NULL
+    )
+    BEGIN
+        THROW 50000, '指定されたカラムが対象テーブルに存在しません。', 1;
+    END;
+
+    IF EXISTS (
+        SELECT 1
+        FROM @RequestedColumns rc
+        JOIN sys.columns c
+            ON c.object_id = @ObjectId
+            AND c.name = rc.ColumnName
+        WHERE
+            c.is_computed = 1
+            OR c.system_type_id = 189
+    )
+    BEGIN
+        THROW 50000, 'computed列またはrowversion/timestamp列は指定できません。', 1;
+    END;
+
+    IF EXISTS (
+        SELECT 1
+        FROM @RequestedColumns rc
+        JOIN sys.columns c
+            ON c.object_id = @ObjectId
+            AND c.name = rc.ColumnName
+        JOIN sys.types ty ON ty.user_type_id = c.user_type_id
+        WHERE
+            ty.is_user_defined = 1
+            OR ty.name IN (N'sql_variant', N'hierarchyid', N'geometry', N'geography')
+    )
+    BEGIN
+        THROW 50000, '未対応の型を含むカラムは指定できません。', 1;
+    END;
+
+    INSERT INTO @SelectedColumns (
+        ColumnId,
+        ColumnName,
+        TypeName,
+        IsIdentity,
+        IsComputed,
+        IsRowversion,
+        IsNullable,
+        HasDefault,
+        IsUnsupported
+    )
+    SELECT
+        c.column_id,
+        c.name,
+        ty.name,
+        c.is_identity,
+        c.is_computed,
+        CASE WHEN c.system_type_id = 189 THEN 1 ELSE 0 END,
+        c.is_nullable,
+        CASE WHEN dc.object_id IS NULL THEN 0 ELSE 1 END,
+        CASE
+            WHEN ty.is_user_defined = 1
+                OR ty.name IN (N'sql_variant', N'hierarchyid', N'geometry', N'geography')
+                THEN 1
+            ELSE 0
+        END
+    FROM sys.columns c
+    JOIN @RequestedColumns rc
+        ON rc.ColumnName = c.name
+    JOIN sys.types ty ON ty.user_type_id = c.user_type_id
+    LEFT JOIN sys.default_constraints dc
+        ON dc.parent_object_id = c.object_id
+        AND dc.parent_column_id = c.column_id
+    WHERE
+        c.object_id = @ObjectId
+        AND (@IncludeIdentity = 1 OR c.is_identity = 0)
+    ORDER BY c.column_id;
+END;
+
+IF NOT EXISTS (SELECT 1 FROM @SelectedColumns)
+BEGIN
+    THROW 50000, '出力対象のカラムがありません。', 1;
+END;
+
+IF EXISTS (
+    SELECT 1
+    FROM @SelectedColumns
+    WHERE IsUnsupported = 1
+)
+BEGIN
+    THROW 50000, '未対応の型を含むためINSERT文を生成できません。', 1;
+END;
+
+IF EXISTS (SELECT 1 FROM @RequestedColumns)
+AND EXISTS (
+    SELECT 1
+    FROM sys.columns c
+    LEFT JOIN @RequestedColumns rc
+        ON rc.ColumnName = c.name
+    LEFT JOIN sys.default_constraints dc
+        ON dc.parent_object_id = c.object_id
+        AND dc.parent_column_id = c.column_id
+    WHERE
+        c.object_id = @ObjectId
+        AND c.is_nullable = 0
+        AND c.is_identity = 0
+        AND c.is_computed = 0
+        AND c.system_type_id <> 189
+        AND dc.object_id IS NULL
+        AND rc.ColumnName IS NULL
+)
+BEGIN
+    THROW 50000, 'NOT NULLかつDEFAULT制約のない列が不足しています。', 1;
+END;
+
+SELECT
+    @NeedIdentityInsert = CASE WHEN EXISTS (
+        SELECT 1
+        FROM @SelectedColumns
+        WHERE IsIdentity = 1
+    ) THEN 1 ELSE 0 END;
+
+SELECT
+    @ColumnList = STRING_AGG(CONVERT(nvarchar(max), QUOTENAME(sc.ColumnName)), N', ')
+        WITHIN GROUP (ORDER BY sc.ColumnId)
+FROM @SelectedColumns sc;
+
+SELECT
+    @ValueExpression = STRING_AGG(
+        CAST(
+            CASE
+                WHEN sc.TypeName IN (N'nvarchar', N'nchar', N'ntext', N'xml')
+                    THEN N'ISNULL(N'''''''' + REPLACE(CONVERT(nvarchar(max), ' + QUOTENAME(sc.ColumnName) + N'), N'''''''', N'''''''''''') + N'''''''', N''NULL'')'
+
+                WHEN sc.TypeName IN (N'varchar', N'char', N'text')
+                    THEN N'ISNULL('''''''' + REPLACE(CONVERT(varchar(max), ' + QUOTENAME(sc.ColumnName) + N'), '''''''', '''''''''''') + '''''''', ''NULL'')'
+
+                WHEN sc.TypeName IN (N'date', N'datetime', N'datetime2', N'smalldatetime', N'datetimeoffset', N'time')
+                    THEN N'ISNULL('''''''' + CONVERT(nvarchar(50), ' + QUOTENAME(sc.ColumnName) + N', 126) + '''''''', ''NULL'')'
+
+                WHEN sc.TypeName = N'uniqueidentifier'
+                    THEN N'ISNULL('''''''' + CONVERT(nvarchar(36), ' + QUOTENAME(sc.ColumnName) + N') + '''''''', ''NULL'')'
+
+                WHEN sc.TypeName = N'bit'
+                    THEN N'ISNULL(CONVERT(nvarchar(1), CONVERT(int, ' + QUOTENAME(sc.ColumnName) + N')), N''NULL'')'
+
+                WHEN sc.TypeName IN (N'binary', N'varbinary', N'image')
+                    THEN N'ISNULL(N''0x'' + CONVERT(nvarchar(max), ' + QUOTENAME(sc.ColumnName) + N', 2), N''NULL'')'
+
+                ELSE
+                    N'ISNULL(CONVERT(nvarchar(max), ' + QUOTENAME(sc.ColumnName) + N'), N''NULL'')'
+            END
+        AS nvarchar(max)),
+        N' + N'', '' + '
+    ) WITHIN GROUP (ORDER BY sc.ColumnId)
+FROM @SelectedColumns sc;
+
+SET @Sql = N'
+DECLARE @Rows TABLE (
+    SortKey int NOT NULL,
+    SqlLine nvarchar(max) NOT NULL
+);
+
+INSERT INTO @Rows (SortKey, SqlLine)
+SELECT
+    ROW_NUMBER() OVER (' + @WindowOrderClause + N'),
+    N''INSERT INTO ' + @ResolvedFullTableName + N' (' + @ColumnList + N') VALUES ('' +
+    ' + @ValueExpression + N' +
+    N'');''
+FROM ' + @ResolvedFullTableName +
+CASE
+    WHEN @WhereClause = N'' THEN N''
+    ELSE NCHAR(10) + @WhereClause
+END + N';
+
+SELECT SqlLine
+FROM (
+' + CASE
+        WHEN @NeedIdentityInsert = 1
+            THEN N'    SELECT 0 AS SortKey, N''SET IDENTITY_INSERT ' + @ResolvedFullTableName + N' ON;'' AS SqlLine
+    WHERE EXISTS (SELECT 1 FROM @Rows)
+    UNION ALL
+'
+        ELSE N''
+    END + N'    SELECT SortKey, SqlLine
+    FROM @Rows
+' + CASE
+        WHEN @NeedIdentityInsert = 1
+            THEN N'    UNION ALL
+    SELECT 2147483647, N''SET IDENTITY_INSERT ' + @ResolvedFullTableName + N' OFF;''
+    WHERE EXISTS (SELECT 1 FROM @Rows)
+'
+        ELSE N''
+    END + N') AS X
+ORDER BY SortKey;';
+
+EXEC sys.sp_executesql @Sql;`;
+      }
+
+      function fallbackCopy(text) {
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        textarea.style.position = 'fixed';
+        textarea.style.left = '-1000px';
+        textarea.style.top = '-1000px';
+        document.body.appendChild(textarea);
+        textarea.focus();
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+      }
+
+      function showError(message) {
+        errorBox.textContent = message;
+        errorBox.classList.add('is-visible');
+      }
+
+      function clearError() {
+        errorBox.textContent = '';
+        errorBox.classList.remove('is-visible');
+      }
+    })();
+  </script>
+</body>
+</html>
