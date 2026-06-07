@@ -7,6 +7,14 @@
   <style>
     :root {
       --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      --bg:#f4f6f8;
+      --surface:#ffffff;
+      --border:#d8dee6;
+      --text:#1f2937;
+      --muted:#667085;
+      --accent:#1f6feb;
+      --accent-strong:#1757b8;
+      --radius:16px;
     }
     * {
       box-sizing: border-box;
@@ -14,44 +22,55 @@
     body {
       margin: 0;
       font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans JP", "Hiragino Kaku Gothic ProN", Meiryo, sans-serif;
-      padding: 16px;
+      padding: 0;
       line-height: 1.6;
-      background: #fff;
-      color: #222;
+      background: var(--bg);
+      color: var(--text);
+    }
+    .page {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 32px 20px 40px;
+    }
+    .back-link {
+      display: inline-block;
+      margin-bottom: 12px;
+      font-size: .92rem;
+      color: var(--muted);
+      text-decoration: none;
+    }
+    .back-link:hover {
+      text-decoration: underline;
     }
     h1 {
       margin: 0 0 8px;
-      font-size: 20px;
+      font-size: 1.9rem;
+      line-height: 1.2;
     }
-    p {
-      margin: 0 0 12px;
+    .intro {
+      margin: 0 0 16px;
+      color: var(--muted);
     }
-    .row {
+    .stack {
       display: grid;
-      grid-template-columns: 1fr;
-      gap: 12px;
-    }
-    @media (min-width: 980px) {
-      .row {
-        grid-template-columns: 1fr 1fr;
-      }
+      gap: 16px;
     }
     .box {
-      border: 1px solid #ddd;
-      border-radius: 6px;
-      padding: 10px;
-      background: #fafafa;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 18px;
+      background: var(--surface);
     }
     .box h2 {
-      margin: 4px 2px 8px;
-      font-size: 14px;
+      margin: 0 0 8px;
+      font-size: .95rem;
     }
     textarea {
       width: 100%;
       min-height: 320px;
-      border: 1px solid #ccc;
-      border-radius: 4px;
-      padding: 8px;
+      border: 1px solid #c7d0db;
+      border-radius: 12px;
+      padding: 10px 12px;
       font: 12.5px/1.5 var(--mono);
       resize: vertical;
     }
@@ -66,14 +85,26 @@
       margin-top: 8px;
     }
     button {
-      border: 1px solid #ccc;
-      background: #fff;
-      padding: 6px 10px;
-      border-radius: 4px;
+      appearance: none;
+      border: 1px solid #d4deee;
+      background: #eef3fb;
+      color: #1f3b63;
+      padding: 10px 16px;
+      border-radius: 999px;
       cursor: pointer;
+      font: inherit;
+      font-weight: 600;
     }
-    button:active {
-      transform: translateY(1px);
+    button:hover {
+      background: #e4edf9;
+    }
+    .controls button:first-child {
+      border-color: transparent;
+      background: var(--accent);
+      color: #fff;
+    }
+    .controls button:first-child:hover {
+      background: var(--accent-strong);
     }
     label {
       font-size: 13px;
@@ -94,7 +125,7 @@
       margin: 0 0 12px;
       padding: 10px 12px;
       border: 1px solid #f3b7c1;
-      border-radius: 6px;
+      border-radius: 12px;
       background: #fff3f5;
       color: #b00020;
       font-size: 13px;
@@ -103,15 +134,18 @@
       display: block;
     }
     .notes {
-      margin: 12px 0 0;
-      padding-left: 18px;
+      margin: 6px 0 0 18px;
+      padding: 0;
       font-size: 13px;
     }
     .notes li + li {
       margin-top: 4px;
     }
+    details {
+      font-size: 13px;
+    }
     .hint {
-      color: #666;
+      color: var(--muted);
       font-size: 12px;
       margin-top: 6px;
     }
@@ -121,54 +155,60 @@
   </style>
 </head>
 <body>
-  <h1>SELECT文からINSERT文生成用T-SQLを作成</h1>
-  <p>単一テーブル向けのSELECT文から、SSMSで実行するとINSERT文一覧を返す完成形T-SQLを生成します。</p>
+  <main class="page">
+    <a class="back-link" href="index.html">← 一覧に戻る</a>
+    <h1>SELECT文からINSERT文生成用T-SQLを作成</h1>
+    <p class="intro">単一テーブル向けのSELECT文から、SSMSで実行するとINSERT文一覧を返す完成形T-SQLを生成します。</p>
 
-  <div id="errorBox" class="error-box" role="alert"></div>
+    <div id="errorBox" class="error-box" role="alert"></div>
 
-  <div class="row">
-    <section class="box">
-      <h2>入力（SELECT文）</h2>
-      <textarea
-        id="input"
-        spellcheck="false"
-        placeholder="SELECT *
+    <div class="stack">
+      <section class="box">
+        <h2>入力（SELECT文）</h2>
+        <textarea
+          id="input"
+          spellcheck="false"
+          placeholder="SELECT *
 FROM dbo.Users
 WHERE UserId = '012930'
 ORDER BY UserId DESC;"></textarea>
-      <div class="controls">
-        <label>
-          <input type="checkbox" id="includeIdentity" />
-          IDENTITY列を含める
-        </label>
-        <span id="inputStatus" class="status"></span>
-      </div>
-      <ul class="notes">
-        <li>対応構文は <code class="k">SELECT ... FROM ... [WHERE ...] [ORDER BY ...]</code> のみです。</li>
-        <li>単一テーブルのみ対応します。JOIN、サブクエリ、CTE、GROUP BY、HAVING、UNION系、OPTION、TOP、DISTINCTは非対応です。</li>
-        <li><code class="k">*</code> または単純なカラム名列挙のみ対応します。AS、関数、修飾付きカラム名は非対応です。</li>
-        <li>テーブル名は <code class="k">Users</code> または <code class="k">dbo.Users</code> まで対応します。</li>
-        <li>角括弧付き識別子は対応しますが、空白入り識別子やダブルクォート識別子は非対応です。</li>
-        <li>ORDER BY は単純なカラム名と <code class="k">ASC</code> / <code class="k">DESC</code> のみ対応します。</li>
-        <li>コメント、複数SQL文、テーブルヒントは非対応です。</li>
-      </ul>
-    </section>
+        <div class="controls">
+          <label>
+            <input type="checkbox" id="includeIdentity" />
+            IDENTITY列を含める
+          </label>
+          <span id="inputStatus" class="status"></span>
+        </div>
+        <details style="margin-top:6px;">
+          <summary>使い方 / 注意</summary>
+          <ul class="notes">
+            <li>対応構文は <code class="k">SELECT ... FROM ... [WHERE ...] [ORDER BY ...]</code> のみです。</li>
+            <li>単一テーブルのみ対応します。JOIN、サブクエリ、CTE、GROUP BY、HAVING、UNION系、OPTION、TOP、DISTINCTは非対応です。</li>
+            <li><code class="k">*</code> または単純なカラム名列挙のみ対応します。AS、関数、修飾付きカラム名は非対応です。</li>
+            <li>テーブル名は <code class="k">Users</code> または <code class="k">dbo.Users</code> まで対応します。</li>
+            <li>角括弧付き識別子は対応しますが、空白入り識別子やダブルクォート識別子は非対応です。</li>
+            <li>ORDER BY は単純なカラム名と <code class="k">ASC</code> / <code class="k">DESC</code> のみ対応します。</li>
+            <li>コメント、複数SQL文、テーブルヒントは非対応です。</li>
+          </ul>
+        </details>
+      </section>
 
-    <section class="box">
-      <h2>出力（実行用T-SQL）</h2>
-      <textarea
-        id="output"
-        spellcheck="false"
-        readonly
-        placeholder="ここに生成されたT-SQLが出力されます"></textarea>
-      <div class="controls">
-        <button id="generate">生成</button>
-        <button id="copy">コピー</button>
-        <span id="outputStatus" class="status"></span>
-      </div>
-      <div class="hint">生成結果をSSMSで実行すると、結果セットとしてINSERT文が1行ずつ返ります。</div>
-    </section>
-  </div>
+      <section class="box">
+        <h2>出力（実行用T-SQL）</h2>
+        <textarea
+          id="output"
+          spellcheck="false"
+          readonly
+          placeholder="ここに生成されたT-SQLが出力されます"></textarea>
+        <div class="controls">
+          <button id="generate">生成</button>
+          <button id="copy">コピー</button>
+          <span id="outputStatus" class="status"></span>
+        </div>
+        <div class="hint">生成結果をSSMSで実行すると、結果セットとしてINSERT文が1行ずつ返ります。</div>
+      </section>
+    </div>
+  </main>
 
   <script>
     (() => {

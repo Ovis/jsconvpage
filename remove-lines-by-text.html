@@ -27,6 +27,14 @@
         linear-gradient(180deg, #f7f9fb 0%, var(--bg) 100%);
     }
     .page{max-width:1180px;margin:0 auto;padding:32px 20px 40px}
+    .back-link{
+      display:inline-block;
+      margin-bottom:12px;
+      font-size:.92rem;
+      color:var(--muted);
+      text-decoration:none;
+    }
+    .back-link:hover{text-decoration:underline}
     h1{margin:0 0 8px;font-size:1.9rem;line-height:1.2}
     .layout{display:grid;gap:16px;margin-bottom:16px}
     @media(min-width:960px){.layout{grid-template-columns:minmax(0,1fr) 360px}}
@@ -104,6 +112,7 @@
 </head>
 <body>
   <main class="page">
+    <a class="back-link" href="index.html">← 一覧に戻る</a>
     <h1>行削除ツール</h1>
 
     <div class="layout">

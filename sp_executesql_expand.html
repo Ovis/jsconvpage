@@ -5,69 +5,114 @@
   <title>sp_executesql 展開ツール</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
-    :root { --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
+    :root {
+      --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      --bg:#f4f6f8;
+      --surface:#ffffff;
+      --border:#d8dee6;
+      --text:#1f2937;
+      --muted:#667085;
+      --accent:#1f6feb;
+      --accent-strong:#1757b8;
+      --radius:16px;
+    }
     * { box-sizing: border-box; }
-    body { margin:0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans JP", "Hiragino Kaku Gothic ProN", Meiryo, sans-serif; padding: 16px; line-height:1.6; }
-    h1 { font-size: 18px; margin: 0 0 8px; }
-    .row { display:grid; grid-template-columns: 1fr; gap: 12px; }
-    @media (min-width: 980px) { .row { grid-template-columns: 1fr 1fr; } }
-    .box { border:1px solid #ddd; border-radius:6px; padding:10px; background:#fafafa; }
-    .box h2 { margin:4px 2px 8px; font-size: 14px; }
-    textarea { width:100%; min-height:320px; border:1px solid #ccc; border-radius:4px; padding:8px; font: 12.5px/1.5 var(--mono); resize: vertical; }
+    body {
+      margin:0;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans JP", "Hiragino Kaku Gothic ProN", Meiryo, sans-serif;
+      padding: 0;
+      line-height:1.6;
+      background: var(--bg);
+      color: var(--text);
+    }
+    .page { max-width: 1180px; margin: 0 auto; padding: 32px 20px 40px; }
+    .back-link {
+      display:inline-block;
+      margin-bottom:12px;
+      font-size:.92rem;
+      color:var(--muted);
+      text-decoration:none;
+    }
+    .back-link:hover { text-decoration:underline; }
+    h1 { font-size: 1.9rem; line-height: 1.2; margin: 0 0 8px; }
+    .intro { margin: 0 0 18px; color: var(--muted); }
+    .stack { display:grid; gap: 16px; }
+    .box { border:1px solid var(--border); border-radius:var(--radius); padding:18px; background:var(--surface); }
+    .box h2 { margin:0 0 8px; font-size: .95rem; }
+    textarea { width:100%; min-height:320px; border:1px solid #c7d0db; border-radius:12px; padding:10px 12px; font: 12.5px/1.5 var(--mono); resize: vertical; }
     textarea[readonly] { background:#f6f6f6; }
     .controls { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-top:8px; }
-    button { border:1px solid #ccc; background:#fff; padding:6px 10px; border-radius:4px; cursor:pointer; }
-    button:active { transform: translateY(1px); }
+    button {
+      appearance:none;
+      border:1px solid #d4deee;
+      background:#eef3fb;
+      color:#1f3b63;
+      padding:10px 16px;
+      border-radius:999px;
+      cursor:pointer;
+      font: inherit;
+      font-weight: 600;
+    }
+    button:hover { background:#e4edf9; }
+    .controls button:first-child {
+      border-color: transparent;
+      background: var(--accent);
+      color: #fff;
+    }
+    .controls button:first-child:hover { background: var(--accent-strong); }
     label { font-size: 13px; user-select:none; }
     .status { font-size:12px; margin-left:auto; }
     .ok { color:#117a37; }
     .err { color:#b00020; }
     details { font-size: 13px; }
     table { width:100%; border-collapse: collapse; margin-top:6px; }
-    th, td { border:1px solid #ddd; padding:4px 6px; font-size:12.5px; vertical-align: top; }
-    th { background:#f0f0f0; text-align:left; }
+    th, td { border:1px solid #d8dee6; padding:4px 6px; font-size:12.5px; vertical-align: top; }
+    th { background:#eef3fb; text-align:left; }
     code.k { font-family: var(--mono); }
-    .hint { color:#666; font-size:12px; margin-top:6px; }
+    .hint { color:var(--muted); font-size:12px; margin-top:6px; }
   </style>
 </head>
 <body>
-  <h1>sp_executesql 展開ツール</h1>
-  <p style="margin-top:0;">Profilerで取得した <code class="k">exec sp_executesql N'...'</code> を貼り付けて「変換」ボタンを押すことで、パラメータ埋込済の生SQLを生成します。</p>
+  <main class="page">
+    <a class="back-link" href="index.html">← 一覧に戻る</a>
+    <h1>sp_executesql 展開ツール</h1>
+    <p class="intro">Profilerで取得した <code class="k">exec sp_executesql N'...'</code> を貼り付けて、パラメータ埋込済の生SQLへ変換します。</p>
 
-  <div class="row">
-    <section class="box">
-      <h2>入力（sp_executesql 全文）</h2>
-      <textarea id="input" spellcheck="false" placeholder="ここに sp_executesql を貼り付けてください"></textarea>
-      <div class="controls">
-        <label title="IN (@var) のとき、@var が 'a,b,c' なら IN ('a','b','c') に展開します。">
-          <input type="checkbox" id="expandCsv" checked> IN句でカンマ区切りを展開
-        </label>
-        <span id="msg" class="status"></span>
-      </div>
-      <details style="margin-top:6px;">
-        <summary>使い方 / 注意</summary>
-        <ul style="margin:6px 0 0 18px; padding:0;">
-          <li>日本語名パラメータ、<code class="k">nvarchar/nchar</code> の <code class="k">N'...'</code>、数値、日付系に対応。</li>
-          <li>このツールは<b>文字列置換ベース</b>です。極端なエッジケース（コメント中の <code class="k">@var</code>、複雑なネスト等）は対象外。</li>
-        </ul>
-      </details>
-    </section>
+    <div class="stack">
+      <section class="box">
+        <h2>入力（sp_executesql 全文）</h2>
+        <textarea id="input" spellcheck="false" placeholder="ここに sp_executesql を貼り付けてください"></textarea>
+        <div class="controls">
+          <label title="IN (@var) のとき、@var が 'a,b,c' なら IN ('a','b','c') に展開します。">
+            <input type="checkbox" id="expandCsv" checked> IN句でカンマ区切りを展開
+          </label>
+          <span id="msg" class="status"></span>
+        </div>
+        <details style="margin-top:6px;">
+          <summary>使い方 / 注意</summary>
+          <ul style="margin:6px 0 0 18px; padding:0;">
+            <li>日本語名パラメータ、<code class="k">nvarchar/nchar</code> の <code class="k">N'...'</code>、数値、日付系に対応。</li>
+            <li>このツールは<b>文字列置換ベース</b>です。極端なエッジケース（コメント中の <code class="k">@var</code>、複雑なネスト等）は対象外。</li>
+          </ul>
+        </details>
+      </section>
 
-    <section class="box">
-      <h2>出力（埋め込み済みSQL）</h2>
-      <textarea id="output" spellcheck="false" readonly placeholder="ここに展開後のSQLが出力されます"></textarea>
-      <div class="controls">
-        <button id="convert">変換</button>
-        <button id="copy">コピー</button>
-        <button id="clear">クリア</button>
-        <span id="msg2" class="status"></span>
-      </div>
-      <details style="margin-top:6px;">
-        <summary>解析したパラメータを見る</summary>
-        <div id="paramView" class="hint"></div>
-      </details>
-    </section>
-  </div>
+      <section class="box">
+        <h2>出力（埋め込み済みSQL）</h2>
+        <textarea id="output" spellcheck="false" readonly placeholder="ここに展開後のSQLが出力されます"></textarea>
+        <div class="controls">
+          <button id="convert">変換</button>
+          <button id="copy">コピー</button>
+          <button id="clear">クリア</button>
+          <span id="msg2" class="status"></span>
+        </div>
+        <details style="margin-top:6px;">
+          <summary>解析したパラメータを見る</summary>
+          <div id="paramView" class="hint"></div>
+        </details>
+      </section>
+    </div>
+  </main>
 
 <script>
 (() => {

@@ -2,59 +2,152 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>TSV → Markdown テーブル変換＆プレビュー</title>
   <style>
-    body { font-family: sans-serif; padding: 20px; }
-    textarea { width: 100%; box-sizing: border-box; font-family: monospace; }
-    #output, #preview { height: 200px; }
-    #error { color: red; margin-top: 10px; }
-    button { margin: 10px 0; padding: 8px 16px; }
+    :root{
+      --bg:#f4f6f8;
+      --surface:#ffffff;
+      --border:#d8dee6;
+      --text:#1f2937;
+      --muted:#667085;
+      --accent:#1f6feb;
+      --accent-strong:#1757b8;
+      --radius:16px;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans JP", "Hiragino Kaku Gothic ProN", Meiryo, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+    }
+    .page {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 32px 20px 40px;
+    }
+    .back-link {
+      display: inline-block;
+      margin-bottom: 12px;
+      font-size: .92rem;
+      color: var(--muted);
+      text-decoration: none;
+    }
+    .back-link:hover { text-decoration: underline; }
+    h1 {
+      margin: 0 0 8px;
+      font-size: 1.9rem;
+      line-height: 1.2;
+    }
+    .intro {
+      margin: 0 0 18px;
+      color: var(--muted);
+    }
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 18px;
+    }
+    .card + .card { margin-top: 16px; }
+    .field + .field { margin-top: 14px; }
+    label, h2 {
+      display: block;
+      margin: 0 0 8px;
+      font-size: .95rem;
+      font-weight: 600;
+    }
+    h2 { font-size: 1rem; }
+    textarea {
+      width: 100%;
+      border: 1px solid #c7d0db;
+      border-radius: 12px;
+      padding: 10px 12px;
+      font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      resize: vertical;
+      background: #fff;
+      color: inherit;
+    }
+    #input { min-height: 180px; }
+    #output { min-height: 200px; }
+    .actions {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+      margin-top: 12px;
+    }
+    button {
+      appearance: none;
+      border: 1px solid transparent;
+      border-radius: 999px;
+      padding: 10px 16px;
+      font: inherit;
+      font-weight: 600;
+      color: #fff;
+      background: var(--accent);
+      cursor: pointer;
+    }
+    button:hover { background: var(--accent-strong); }
+    #error {
+      min-height: 1.5em;
+      color: #b00020;
+      margin-top: 10px;
+      font-size: .92rem;
+    }
     #preview {
-      border: 1px solid #ccc;
+      min-height: 220px;
+      border: 1px solid #c7d0db;
+      border-radius: 12px;
       padding: 10px;
       overflow: auto;
-      background: #fafafa;
+      background: #fbfcfe;
     }
-    /* ここから枠線スタイル */
     #preview table {
       width: 100%;
       border-collapse: collapse;
     }
     #preview th,
     #preview td {
-      border: 1px solid #999;
-      padding: 4px 8px;
+      border: 1px solid #c7d0db;
+      padding: 6px 8px;
     }
-    /* optional: ヘッダー行を目立たせる */
     #preview th {
-      background: #eee;
+      background: #eef3fb;
     }
-    /* スクロール時でもヘッダーを固定したい場合（ブラウザによって動作が異なります） */
-    /* #preview th {
-      position: sticky;
-      top: 0;
-      background: #eee;
-    } */
-    /* ここまで枠線スタイル */
   </style>
-  <!-- marked.js を CDN から読み込み -->
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 </head>
 <body>
-  <h1>TSV → Markdown テーブル変換＆プレビュー</h1>
-  <p>TSV データを貼り付けて「変換」ボタンを押すと、Markdown とプレビューが生成されます。</p>
+  <main class="page">
+    <a class="back-link" href="index.html">← 一覧に戻る</a>
+    <h1>TSV → Markdown テーブル変換＆プレビュー</h1>
+    <p class="intro">TSV データを貼り付けて「変換」を押すと、Markdown とプレビューをまとめて確認できます。</p>
 
-  <label for="input">TSV 入力：</label>
-  <textarea id="input" rows="6" placeholder="Key\tType\t…\n2EA21B7…\trefresh_token\t…"></textarea>
+    <section class="card">
+      <div class="field">
+        <label for="input">TSV 入力</label>
+        <textarea id="input" rows="6" placeholder="Key\tType\t…&#10;2EA21B7…\trefresh_token\t…"></textarea>
+      </div>
+      <div class="actions">
+        <button id="convert">変換</button>
+      </div>
+      <div id="error" role="alert"></div>
+    </section>
 
-  <button id="convert">変換</button>
-  <div id="error"></div>
-
-  <label for="output">Markdown 出力：</label>
-  <textarea id="output" readonly></textarea>
-
-  <h2>Markdown プレビュー：</h2>
-  <div id="preview"></div>
+    <section class="card">
+      <div class="field">
+        <label for="output">Markdown 出力</label>
+        <textarea id="output" readonly></textarea>
+      </div>
+      <div class="field">
+        <h2>Markdown プレビュー</h2>
+        <div id="preview"></div>
+      </div>
+    </section>
+  </main>
 
   <script>
     function tsvToMarkdown(tsv) {
