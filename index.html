@@ -1,44 +1,115 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ja">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>ツール一覧</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>変換・整形ツール集</title>
   <style>
-    body {
-      font-family: sans-serif;
-      padding: 2rem;
-      background-color: #f9f9f9;
+    :root{
+      --bg:#f7f7f7;
+      --surface:#ffffff;
+      --border:#d9d9d9;
+      --text:#222;
+      --muted:#666;
+      --accent:#0b69c7;
+      --radius:10px;
     }
-    h1 {
-      font-size: 1.8rem;
-      margin-bottom: 1rem;
+    *{box-sizing:border-box}
+    body{
+      margin:0;
+      font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+      color:var(--text);
+      background:var(--bg);
     }
-    ul {
-      list-style: none;
-      padding: 0;
+    .page{
+      max-width:900px;
+      margin:0 auto;
+      padding:28px 20px 36px;
     }
-    li {
-      margin: 0.5rem 0;
+    h1{
+      margin:0 0 18px;
+      font-size:1.7rem;
+      line-height:1.2;
     }
-    a {
-      text-decoration: none;
-      color: #007acc;
+    .grid{
+      display:grid;
+      gap:14px;
     }
-    a:hover {
-      text-decoration: underline;
+    @media(min-width:860px){
+      .grid{grid-template-columns:repeat(2, minmax(0, 1fr))}
+    }
+    .card{
+      background:var(--surface);
+      border:1px solid var(--border);
+      border-radius:var(--radius);
+      padding:16px;
+    }
+    .card h2{
+      margin:0 0 10px;
+      font-size:1rem;
+    }
+    ul{
+      list-style:none;
+      padding:0;
+      margin:0;
+      display:grid;
+      gap:10px;
+    }
+    a{
+      display:block;
+      text-decoration:none;
+      color:var(--accent);
+      padding:6px 0;
+    }
+    a:hover{
+      text-decoration:underline;
     }
   </style>
 </head>
 <body>
-  <h1>変換ツール一覧</h1>
-  <ul>
-    <li><a href="tsvtomarkdown.html">TSV → Markdownテーブル変換</a></li>
-    <li><a href="markdown-preview.html">Markdownプレビュー</a></li>
-    <li><a href="remove-duplicate-lines.html">重複行削除</a></li>
-    <li><a href="insert-column-editor.html">INSERT文カラム編集</a></li>
-    <li><a href="select-to-insert-tsql.html">SELECT→INSERT用T-SQL生成</a></li>
-    <li><a href="sp_executesql_expand.html">sp_executesqlクエリ変換</a></li>
-  </ul>
+  <main class="page">
+    <h1>変換・整形ツール集</h1>
+
+    <div class="grid">
+      <section class="card">
+        <h2>行操作</h2>
+        <ul>
+          <li>
+            <a href="remove-lines-by-text.html">行削除ツール</a>
+          </li>
+          <li>
+            <a href="remove-duplicate-lines.html">重複行削除ツール</a>
+          </li>
+        </ul>
+      </section>
+
+      <section class="card">
+        <h2>Markdown</h2>
+        <ul>
+          <li>
+            <a href="tsvtomarkdown.html">TSV → Markdownテーブル変換</a>
+          </li>
+          <li>
+            <a href="markdown-preview.html">Markdownプレビュー</a>
+          </li>
+        </ul>
+      </section>
+
+      <section class="card">
+        <h2>SQL</h2>
+        <ul>
+          <li>
+            <a href="insert-column-editor.html">INSERT文カラム編集</a>
+          </li>
+          <li>
+            <a href="select-to-insert-tsql.html">SELECT→INSERT用T-SQL生成</a>
+          </li>
+          <li>
+            <a href="sp_executesql_expand.html">sp_executesqlクエリ変換</a>
+          </li>
+        </ul>
+      </section>
+    </div>
+  </main>
 </body>
 </html>

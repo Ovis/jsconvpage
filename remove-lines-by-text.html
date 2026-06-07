@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>行削除ツール</title>
+  <style>
+    :root{
+      --bg:#f4f6f8;
+      --surface:#ffffff;
+      --border:#d8dee6;
+      --text:#1f2937;
+      --muted:#667085;
+      --accent:#1f6feb;
+      --accent-strong:#1757b8;
+      --shadow:0 12px 28px rgba(15, 23, 42, .08);
+      --radius:16px;
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0;
+      font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+      line-height:1.6;
+      color:var(--text);
+      background:
+        radial-gradient(circle at top right, rgba(31,111,235,.08), transparent 28%),
+        linear-gradient(180deg, #f7f9fb 0%, var(--bg) 100%);
+    }
+    .page{max-width:1180px;margin:0 auto;padding:32px 20px 40px}
+    h1{margin:0 0 8px;font-size:1.9rem;line-height:1.2}
+    .layout{display:grid;gap:16px;margin-bottom:16px}
+    @media(min-width:960px){.layout{grid-template-columns:minmax(0,1fr) 360px}}
+    .card{
+      background:var(--surface);
+      border:1px solid var(--border);
+      border-radius:var(--radius);
+      box-shadow:var(--shadow);
+      padding:18px;
+    }
+    label{display:block;font-size:.92rem;font-weight:600;margin-bottom:6px}
+    .hint,.stats,.status{font-size:.9rem;color:var(--muted)}
+    .hint{margin-top:10px}
+    .field + .field{margin-top:14px}
+    textarea,input[type="text"],select,input[type="file"]{
+      width:100%;
+      border:1px solid #c7d0db;
+      border-radius:12px;
+      padding:10px 12px;
+      font:inherit;
+      background:#fff;
+      color:inherit;
+    }
+    textarea{min-height:320px;resize:vertical}
+    select{appearance:auto}
+    .stack{display:grid;gap:12px}
+    .inline{
+      display:flex;
+      align-items:center;
+      gap:8px;
+      flex-wrap:wrap;
+    }
+    .checkbox{
+      display:flex;
+      align-items:center;
+      gap:8px;
+      font-size:.92rem;
+      font-weight:500;
+      margin:0;
+    }
+    .checkbox input{margin:0}
+    .actions{
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+      margin-top:16px;
+    }
+    .btn{
+      appearance:none;
+      border:1px solid transparent;
+      border-radius:999px;
+      padding:10px 16px;
+      font:inherit;
+      font-weight:600;
+      cursor:pointer;
+      transition:background-color .15s ease,border-color .15s ease,transform .15s ease;
+    }
+    .btn:hover{transform:translateY(-1px)}
+    .btn-primary{background:var(--accent);color:#fff}
+    .btn-primary:hover{background:var(--accent-strong)}
+    .btn-secondary{background:#eef3fb;border-color:#d4deee;color:#1f3b63}
+    .btn-secondary:hover{background:#e4edf9}
+    .stats-row{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:12px;
+      flex-wrap:wrap;
+      margin-top:14px;
+    }
+    .result-block{margin-top:8px}
+    .result-block label{margin-bottom:8px}
+    .output{min-height:280px}
+  </style>
+</head>
+<body>
+  <main class="page">
+    <h1>行削除ツール</h1>
+
+    <div class="layout">
+      <section class="card">
+        <div class="field">
+          <label for="file">テキストファイルを選択</label>
+          <input id="file" type="file" accept=".txt,.log" />
+          <div class="hint">読み込み対応: UTF-8 のみ</div>
+        </div>
+        <div class="field">
+          <label for="input">元テキスト（複数行）</label>
+          <textarea id="input" placeholder="1行目&#10;2行目&#10;…"></textarea>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="stack">
+          <div class="field">
+            <label for="target">削除対象のテキスト</label>
+            <input id="target" type="text" placeholder="例）削除したい行の文字列" />
+          </div>
+          <div class="field">
+            <label for="mode">一致方法</label>
+            <select id="mode">
+              <option value="exact">完全一致</option>
+              <option value="partial">部分一致（含む）</option>
+            </select>
+          </div>
+          <label class="checkbox"><input id="remove-empty" type="checkbox" /> 空行を削除</label>
+        </div>
+
+        <div class="actions">
+          <button id="run" class="btn btn-primary">行を削除</button>
+          <button id="copy" class="btn btn-secondary" title="結果をクリップボードへコピー">結果をコピー</button>
+          <button id="clear" class="btn btn-secondary">クリア</button>
+        </div>
+
+        <div class="stats-row">
+          <div class="stats">削除行数: <span id="removed">0</span></div>
+          <div id="status" class="status" aria-live="polite"></div>
+        </div>
+
+        <div class="hint">完全一致は Unicode 正規化と前後空白の無視を含みます。部分一致は Unicode 正規化のみを行い、前後空白は保持したまま比較します。大文字小文字は区別します。</div>
+      </section>
+    </div>
+
+    <section class="result-block">
+      <label for="output">結果</label>
+      <textarea id="output" class="output" readonly placeholder="ここに結果が表示されます"></textarea>
+    </section>
+  </main>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    let statusTimer = 0;
+
+    function normalizeForCompare(s){
+      return s.trim().normalize('NFKC');
+    }
+
+    function normalizeForPartial(s){
+      return s.normalize('NFKC');
+    }
+
+    function setStatus(message){
+      clearTimeout(statusTimer);
+      $('status').textContent = message;
+      if(!message) return;
+      statusTimer = window.setTimeout(() => {
+        $('status').textContent = '';
+      }, 2000);
+    }
+
+    function filterLines(){
+      const raw = $('input').value.replace(/\r\n?/g,'\n');
+      const rawTarget = $('target').value;
+      const target = normalizeForCompare(rawTarget);
+      const partialTarget = normalizeForPartial(rawTarget);
+      const mode = $('mode').value;
+      const removeEmpty = $('remove-empty').checked;
+      const hasTarget = rawTarget.length > 0;
+
+      if(!hasTarget && !removeEmpty){
+        $('output').value = raw;
+        $('removed').textContent = '0';
+        setStatus('');
+        return;
+      }
+
+      const lines = raw.split('\n');
+      let removed = 0;
+      const out = lines.filter(line => {
+        const matchEmpty = removeEmpty && line.trim() === '';
+        const matchTarget = hasTarget && (
+          mode === 'exact'
+            ? normalizeForCompare(line) === target
+            : normalizeForPartial(line).includes(partialTarget)
+        );
+        const match = matchEmpty || matchTarget;
+        if(match) removed++;
+        return !match;
+      });
+
+      $('output').value = out.join('\n');
+      $('removed').textContent = String(removed);
+      setStatus('');
+    }
+
+    function clearAll(){
+      $('file').value = '';
+      $('input').value = '';
+      $('target').value = '';
+      $('mode').value = 'exact';
+      $('remove-empty').checked = false;
+      $('output').value = '';
+      $('removed').textContent = '0';
+      setStatus('');
+    }
+
+    $('run').addEventListener('click', filterLines);
+
+    $('copy').addEventListener('click', async () => {
+      if(!$('output').value) return;
+      try {
+        await navigator.clipboard.writeText($('output').value);
+        setStatus('コピーしました');
+      } catch {
+        setStatus('コピーに失敗しました');
+      }
+    });
+
+    $('clear').addEventListener('click', clearAll);
+
+    $('file').addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if(!file) return;
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        $('input').value = ev.target.result;
+        setStatus('');
+      };
+      reader.readAsText(file, 'utf-8');
+    });
+  </script>
+</body>
+</html>
