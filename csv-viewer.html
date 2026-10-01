@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'self'" />
+  <title>CSVビューア</title>
+  <link rel="stylesheet" href="css/csv-viewer.css" />
+</head>
+<body>
+  <main class="page">
+    <header class="page-header">
+      <div>
+        <a class="back-link" href="index.html">← 一覧に戻る</a>
+        <h1>CSVビューア</h1>
+        <p>CSV・TSVを読み込み、検索や表示調整をしながら確認できます。</p>
+      </div>
+      <p class="privacy-note">データはブラウザ内だけで処理され、外部へ送信されません。</p>
+    </header>
+
+    <section id="drop-zone" class="source-panel" aria-label="データの読み込み">
+      <div class="source-actions">
+        <button id="open-file-button" class="button button-primary" type="button">ファイルを選択</button>
+        <input id="file-input" type="file" accept=".csv,.tsv,text/csv,text/tab-separated-values,text/plain" hidden />
+        <button id="open-paste-button" class="button" type="button">テキストを貼り付け</button>
+        <span class="drop-hint">または、ここへCSV・TSVをドロップ</span>
+      </div>
+
+      <div class="source-options">
+        <label>
+          文字コード
+          <select id="encoding-select">
+            <option value="auto">自動判定</option>
+            <option value="utf-8">UTF-8</option>
+            <option value="shift_jis">Shift_JIS</option>
+          </select>
+        </label>
+        <label>
+          区切り文字
+          <select id="delimiter-select">
+            <option value="auto">自動判定</option>
+            <option value=",">カンマ</option>
+            <option value="tab">タブ</option>
+            <option value=";">セミコロン</option>
+          </select>
+        </label>
+        <span id="source-summary" class="source-summary" aria-live="polite"></span>
+      </div>
+    </section>
+
+    <section id="issue-panel" class="issue-panel" aria-live="polite" hidden>
+      <div>
+        <h2 id="issue-title"></h2>
+        <p id="issue-summary"></p>
+        <ol id="issue-list"></ol>
+      </div>
+      <button id="close-issue-button" class="icon-button" type="button" aria-label="メッセージを閉じる">×</button>
+    </section>
+
+    <section id="viewer" class="viewer" aria-label="CSVデータ" hidden>
+      <div class="viewer-toolbar">
+        <label class="search-box">
+          <span class="visually-hidden">すべての列を検索</span>
+          <input id="global-search" type="search" placeholder="すべての列から検索" autocomplete="off" />
+        </label>
+        <span id="row-count" class="row-count" aria-live="polite"></span>
+        <button id="toggle-filters-button" class="button button-small" type="button" aria-pressed="false">列フィルター</button>
+        <button id="hide-cell-button" class="button button-small" type="button" disabled>選択セルを隠す</button>
+        <button id="hide-rows-button" class="button button-small" type="button" disabled>選択行を隠す</button>
+        <button id="open-columns-button" class="button button-small" type="button" aria-haspopup="dialog">列を表示・非表示</button>
+        <button id="open-hidden-button" class="button button-small" type="button" disabled>隠した項目 <span id="hidden-count">0</span></button>
+      </div>
+
+      <div class="display-toolbar">
+        <label>
+          先頭
+          <input id="freeze-count" type="number" min="0" value="1" inputmode="numeric" />
+          列を固定
+        </label>
+        <label>
+          表示密度
+          <select id="density-select">
+            <option value="compact">狭い</option>
+            <option value="normal" selected>標準</option>
+            <option value="comfortable">広い</option>
+          </select>
+        </label>
+        <label class="check-label"><input id="wrap-toggle" type="checkbox" /> セル内を折り返す</label>
+        <span class="toolbar-spacer"></span>
+        <button id="reset-view-button" class="link-button" type="button">表示設定を初期化</button>
+        <button id="export-button" class="button button-small" type="button">表示中のデータを書き出す</button>
+      </div>
+
+      <p id="selection-status" class="selection-status" aria-live="polite">セルをクリックすると選択できます。</p>
+
+      <div id="table-region" class="table-region" role="region" aria-label="CSVテーブル" tabindex="0">
+        <table id="data-table">
+          <colgroup id="table-columns"></colgroup>
+          <thead id="table-head"></thead>
+          <tbody id="table-body"></tbody>
+        </table>
+        <div id="empty-result" class="empty-result" hidden>条件に一致する行はありません。</div>
+      </div>
+
+      <div class="viewer-footer">
+        <span>見出しをクリックして並べ替え</span>
+        <span>見出し右端をドラッグして列幅を変更</span>
+        <span class="toolbar-spacer"></span>
+        <button id="render-more-button" class="button button-small" type="button" hidden>さらに表示</button>
+      </div>
+    </section>
+  </main>
+
+  <dialog id="paste-dialog">
+    <form method="dialog" class="dialog-card">
+      <div class="dialog-header">
+        <div>
+          <h2>CSV・TSVを貼り付け</h2>
+          <p>値はHTMLとして解釈せず、そのまま文字列として表示します。</p>
+        </div>
+        <button class="icon-button" value="cancel" aria-label="閉じる">×</button>
+      </div>
+      <label for="paste-input">テキスト</label>
+      <textarea id="paste-input" rows="12" spellcheck="false" placeholder="商品コード,商品名,数量&#10;DEMO-001,架空の商品,10"></textarea>
+      <div class="dialog-actions">
+        <button class="button" value="cancel">キャンセル</button>
+        <button id="load-paste-button" class="button button-primary" type="button">読み込む</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="columns-dialog">
+    <form method="dialog" class="dialog-card dialog-card-wide">
+      <div class="dialog-header">
+        <div>
+          <h2>列を表示・非表示</h2>
+          <p>表示する列にチェックを付け、隠す列はチェックを外します。</p>
+        </div>
+        <button class="icon-button" value="cancel" aria-label="閉じる">×</button>
+      </div>
+      <div class="column-dialog-toolbar">
+        <label class="search-box"><span class="visually-hidden">列名を検索</span><input id="column-search" type="search" placeholder="列名を検索" /></label>
+        <button id="show-all-columns-button" class="link-button" type="button">すべて表示</button>
+        <button id="hide-all-columns-button" class="link-button" type="button">すべて隠す</button>
+      </div>
+      <div id="column-list" class="column-list"></div>
+      <div class="dialog-actions">
+        <button class="button button-primary" value="ok">完了</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="hidden-dialog">
+    <form method="dialog" class="dialog-card dialog-card-wide">
+      <div class="dialog-header">
+        <div>
+          <h2>隠した項目</h2>
+          <p>行またはセルを個別に表示へ戻せます。</p>
+        </div>
+        <button class="icon-button" value="cancel" aria-label="閉じる">×</button>
+      </div>
+      <div id="hidden-list" class="hidden-list"></div>
+      <div class="dialog-actions split-actions">
+        <button id="restore-all-button" class="link-button" type="button">すべて表示へ戻す</button>
+        <button class="button button-primary" value="ok">完了</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="export-dialog">
+    <form method="dialog" class="dialog-card">
+      <div class="dialog-header">
+        <div>
+          <h2>CSVを書き出す</h2>
+          <p id="export-summary"></p>
+        </div>
+        <button class="icon-button" value="cancel" aria-label="閉じる">×</button>
+      </div>
+      <label class="export-option">
+        <input id="export-safe-toggle" type="checkbox" checked />
+        <span>
+          <strong>数式として実行される値を文字列にする（推奨）</strong>
+          <small>「=」「+」「-」「@」で始まる値へ、出力時だけ「'」を追加します。読み込んだデータは変更しません。</small>
+        </span>
+      </label>
+      <div class="dialog-actions">
+        <button class="button" value="cancel">キャンセル</button>
+        <button id="confirm-export-button" class="button button-primary" type="button">CSVを書き出す</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="js/csv-viewer.js"></script>
+</body>
+</html>
