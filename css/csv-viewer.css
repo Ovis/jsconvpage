@@ -438,6 +438,29 @@ thead tr.filter-row th {
   font-size: .72rem;
 }
 
+thead th[draggable="true"] {
+  cursor: grab;
+}
+
+thead th.is-dragging-column {
+  opacity: .5;
+}
+
+thead th.drop-before::after,
+thead th.drop-after::after {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  border-left: 3px solid var(--accent);
+  content: "";
+  pointer-events: none;
+}
+
+thead th.drop-after::after {
+  border-left: 0;
+  border-right: 3px solid var(--accent);
+}
+
 .resize-handle {
   position: absolute;
   top: 0;
@@ -520,6 +543,7 @@ dialog {
 }
 
 #columns-dialog,
+#column-order-dialog,
 #hidden-dialog {
   width: min(900px, calc(100vw - 30px));
 }
@@ -585,6 +609,7 @@ textarea {
 }
 
 .column-list,
+.column-order-list,
 .hidden-list {
   min-height: 240px;
   max-height: min(60dvh, 560px);
@@ -593,6 +618,51 @@ textarea {
   overflow-y: auto;
   border: 1px solid var(--border);
   border-radius: 8px;
+}
+
+.column-order-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.column-order-item {
+  display: grid;
+  grid-template-columns: 2.5rem minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 11px;
+  border-bottom: 1px solid var(--border);
+}
+
+.column-order-item:last-child {
+  border-bottom: 0;
+}
+
+.column-order-position,
+.column-order-status {
+  color: var(--muted);
+  font-size: .86rem;
+}
+
+.column-order-position {
+  font-variant-numeric: tabular-nums;
+}
+
+.column-order-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.column-order-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.column-order-actions .button {
+  min-width: 36px;
+  min-height: 36px;
 }
 
 .column-item,
@@ -734,6 +804,7 @@ textarea {
   }
 
   .column-list,
+  .column-order-list,
   .hidden-list {
     min-height: 120px;
   }

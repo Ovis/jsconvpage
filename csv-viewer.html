@@ -68,6 +68,7 @@
         <button id="hide-cell-button" class="button button-small" type="button" disabled>選択セルを隠す</button>
         <button id="hide-rows-button" class="button button-small" type="button" disabled>選択行を隠す</button>
         <button id="open-columns-button" class="button button-small" type="button" aria-haspopup="dialog">列を表示・非表示</button>
+        <button id="open-column-order-button" class="button button-small" type="button" aria-haspopup="dialog">列の順番</button>
         <button id="open-hidden-button" class="button button-small" type="button" disabled>隠した項目 <span id="hidden-count">0</span></button>
       </div>
 
@@ -104,6 +105,7 @@
 
       <div class="viewer-footer">
         <span>見出しをクリックして並べ替え</span>
+        <span>見出しをドラッグして列を移動</span>
         <span>見出し右端をドラッグして列幅を変更</span>
         <span class="toolbar-spacer"></span>
         <button id="render-more-button" class="button button-small" type="button" hidden>さらに表示</button>
@@ -145,6 +147,24 @@
       </div>
       <div id="column-list" class="column-list"></div>
       <div class="dialog-actions">
+        <button class="button button-primary" value="ok">完了</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="column-order-dialog" aria-labelledby="column-order-title">
+    <form method="dialog" class="dialog-card dialog-card-wide">
+      <div class="dialog-header">
+        <div>
+          <h2 id="column-order-title">列の順番</h2>
+          <p>▲・▼で列を移動します。変更はすぐにテーブルとCSV出力へ反映されます。</p>
+        </div>
+        <button class="icon-button" value="ok" aria-label="閉じる">×</button>
+      </div>
+      <p id="column-order-status" class="column-order-status" role="status"></p>
+      <ol id="column-order-list" class="column-order-list"></ol>
+      <div class="dialog-actions split-actions">
+        <button id="reset-column-order-button" class="link-button" type="button">元の列順に戻す</button>
         <button class="button button-primary" value="ok">完了</button>
       </div>
     </form>

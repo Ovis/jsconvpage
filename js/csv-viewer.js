@@ -290,11 +290,32 @@
     return output;
   }
 
+  function normalizeColumnOrder(order, columnCount) {
+    if (Array.isArray(order) && order.length === columnCount &&
+        new Set(order).size === columnCount &&
+        order.every((index) => Number.isInteger(index) && index >= 0 && index < columnCount)) {
+      return [...order];
+    }
+    return Array.from({ length: columnCount }, (_, index) => index);
+  }
+
+  function reorderColumn(order, sourceColumn, targetColumn, after = false) {
+    if (sourceColumn === targetColumn || !order.includes(sourceColumn) || !order.includes(targetColumn)) {
+      return [...order];
+    }
+    const result = order.filter((columnIndex) => columnIndex !== sourceColumn);
+    const position = result.indexOf(targetColumn) + (after ? 1 : 0);
+    result.splice(position, 0, sourceColumn);
+    return result;
+  }
+
   const exportedFunctions = {
     detectDelimiter,
     parseDelimited,
     validateParsedRows,
-    escapeCsvValue
+    escapeCsvValue,
+    normalizeColumnOrder,
+    reorderColumn
   };
 
   if (typeof module !== "undefined" && module.exports) {
@@ -322,6 +343,11 @@
       rowCount: document.getElementById("row-count"),
       toggleFiltersButton: document.getElementById("toggle-filters-button"),
       openColumnsButton: document.getElementById("open-columns-button"),
+      openColumnOrderButton: document.getElementById("open-column-order-button"),
+      columnOrderDialog: document.getElementById("column-order-dialog"),
+      columnOrderList: document.getElementById("column-order-list"),
+      columnOrderStatus: document.getElementById("column-order-status"),
+      resetColumnOrderButton: document.getElementById("reset-column-order-button"),
       hideCellButton: document.getElementById("hide-cell-button"),
       hideRowsButton: document.getElementById("hide-rows-button"),
       openHiddenButton: document.getElementById("open-hidden-button"),
@@ -367,6 +393,7 @@
       rawBytes: null,
       rawText: null,
       visibleColumns: [],
+      columnOrder: [],
       columnWidths: [],
       columnFilters: [],
       filtersVisible: false,
@@ -389,6 +416,8 @@
 
     const collator = new Intl.Collator("ja", { numeric: true, sensitivity: "base" });
     let searchTimer = null;
+    let draggedColumn = null;
+    let suppressSortUntil = 0;
 
     function displayDelimiter(delimiter) {
       if (delimiter === "\t") return "タブ区切り";
@@ -476,6 +505,7 @@
       state.isSample = Boolean(source.isSample);
       state.datasetStorageKey = `csv-viewer-settings:${hashHeaders(headers)}`;
       state.visibleColumns = headers.map(() => true);
+      state.columnOrder = normalizeColumnOrder(null, headers.length);
       state.columnWidths = headers.map(() => 160);
       state.columnFilters = headers.map(() => "");
       state.globalQuery = "";
@@ -513,6 +543,7 @@
         const raw = localStorage.getItem(state.datasetStorageKey);
         if (!raw) return;
         const saved = JSON.parse(raw);
+        state.columnOrder = normalizeColumnOrder(saved.columnOrder, state.headers.length);
         if (Array.isArray(saved.visibleColumns) && saved.visibleColumns.length === state.headers.length) {
           state.visibleColumns = saved.visibleColumns.map(Boolean);
         }
@@ -533,6 +564,7 @@
       try {
         localStorage.setItem(state.datasetStorageKey, JSON.stringify({
           visibleColumns: state.visibleColumns,
+          columnOrder: state.columnOrder,
           columnWidths: state.columnWidths,
           freezeCount: state.freezeCount,
           density: state.density,
@@ -545,9 +577,7 @@
     }
 
     function visibleColumnIndexes() {
-      return state.visibleColumns
-        .map((visible, index) => (visible ? index : -1))
-        .filter((index) => index >= 0);
+      return state.columnOrder.filter((columnIndex) => state.visibleColumns[columnIndex]);
     }
 
     function syncViewControls() {
@@ -564,7 +594,8 @@
 
     function buildColumnList() {
       elements.columnList.replaceChildren();
-      state.displayHeaders.forEach((header, columnIndex) => {
+      state.columnOrder.forEach((columnIndex) => {
+        const header = state.displayHeaders[columnIndex];
         const label = createElement("label", { className: "column-item" });
         const checkbox = createElement("input");
         checkbox.type = "checkbox";
@@ -575,6 +606,44 @@
         elements.columnList.append(label);
       });
       filterColumnList();
+    }
+
+    function buildColumnOrderList() {
+      const scrollTop = elements.columnOrderList.scrollTop;
+      elements.columnOrderList.replaceChildren();
+      state.columnOrder.forEach((columnIndex, position) => {
+        const item = createElement("li", { className: "column-order-item" });
+        const number = createElement("span", { className: "column-order-position", text: position + 1 });
+        number.setAttribute("aria-hidden", "true");
+        const name = createElement("span", {
+          className: "column-order-name",
+          text: `${state.displayHeaders[columnIndex]}${state.visibleColumns[columnIndex] ? "" : "（非表示）"}`
+        });
+        const actions = createElement("div", { className: "column-order-actions" });
+        [-1, 1].forEach((direction) => {
+          const button = createElement("button", {
+            className: "button button-small",
+            type: "button",
+            text: direction < 0 ? "▲" : "▼"
+          });
+          button.dataset.moveColumn = String(columnIndex);
+          button.dataset.direction = String(direction);
+          button.disabled = direction < 0 ? position === 0 : position === state.columnOrder.length - 1;
+          button.setAttribute("aria-label", `${state.displayHeaders[columnIndex]}を${direction < 0 ? "前" : "後ろ"}へ移動`);
+          actions.append(button);
+        });
+        item.append(number, name, actions);
+        elements.columnOrderList.append(item);
+      });
+      elements.columnOrderList.scrollTop = scrollTop;
+    }
+
+    function applyColumnOrder(order) {
+      state.columnOrder = order;
+      saveViewSettings();
+      buildColumnList();
+      renderHeader();
+      renderBody();
     }
 
     function filterColumnList() {
@@ -618,6 +687,8 @@
         const th = createElement("th");
         th.scope = "col";
         th.dataset.col = String(columnIndex);
+        th.draggable = true;
+        th.title = "クリックで行を並べ替え / ドラッグで列を移動";
         const button = createElement("button", { className: "sort-button", type: "button" });
         button.dataset.sortColumn = String(columnIndex);
         const label = createElement("span", { text: state.displayHeaders[columnIndex] });
@@ -989,6 +1060,34 @@
       elements.columnsDialog.showModal();
       elements.columnSearch.focus();
     });
+    elements.openColumnOrderButton.addEventListener("click", () => {
+      buildColumnOrderList();
+      elements.columnOrderStatus.textContent = "非表示の列も含め、左からの列順を変更できます。";
+      elements.columnOrderDialog.showModal();
+    });
+    elements.columnOrderList.addEventListener("click", (event) => {
+      const button = event.target.closest("button[data-move-column]");
+      if (!button || button.disabled) return;
+      const columnIndex = Number(button.dataset.moveColumn);
+      const direction = Number(button.dataset.direction);
+      const position = state.columnOrder.indexOf(columnIndex);
+      const targetColumn = state.columnOrder[position + direction];
+      if (targetColumn === undefined) return;
+      applyColumnOrder(reorderColumn(state.columnOrder, columnIndex, targetColumn, direction > 0));
+      buildColumnOrderList();
+      elements.columnOrderStatus.textContent = `${state.displayHeaders[columnIndex]}を ${position + direction + 1} 列目へ移動しました。`;
+      const nextButton = elements.columnOrderList.querySelector(`button[data-move-column="${columnIndex}"][data-direction="${direction}"]`);
+      const focusButton = nextButton.disabled
+        ? elements.columnOrderList.querySelector(`button[data-move-column="${columnIndex}"]:not(:disabled)`)
+        : nextButton;
+      focusButton?.focus({ preventScroll: true });
+      focusButton?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    });
+    elements.resetColumnOrderButton.addEventListener("click", () => {
+      applyColumnOrder(normalizeColumnOrder(null, state.headers.length));
+      buildColumnOrderList();
+      elements.columnOrderStatus.textContent = "読み込んだCSVの列順に戻しました。";
+    });
     elements.columnSearch.addEventListener("input", filterColumnList);
     elements.columnList.addEventListener("change", (event) => {
       const checkbox = event.target.closest("input[data-column]");
@@ -1018,6 +1117,7 @@
     });
 
     elements.tableHead.addEventListener("click", (event) => {
+      if (performance.now() < suppressSortUntil) return;
       const button = event.target.closest("button[data-sort-column]");
       if (!button) return;
       const columnIndex = Number(button.dataset.sortColumn);
@@ -1040,6 +1140,61 @@
       state.columnFilters[columnIndex] = input.value;
       applyFiltersAndRender(true);
     });
+
+    function clearColumnDropMarkers() {
+      elements.tableHead.querySelectorAll(".drop-before, .drop-after").forEach((header) => {
+        header.classList.remove("drop-before", "drop-after");
+      });
+    }
+
+    function finishColumnDrag() {
+      draggedColumn = null;
+      suppressSortUntil = performance.now() + 250;
+      clearColumnDropMarkers();
+      elements.tableHead.querySelectorAll(".is-dragging-column").forEach((header) => {
+        header.classList.remove("is-dragging-column");
+      });
+    }
+
+    elements.tableHead.addEventListener("dragstart", (event) => {
+      const header = event.target.closest('th[draggable="true"]');
+      if (!header || event.target.closest(".resize-handle")) {
+        event.preventDefault();
+        return;
+      }
+      draggedColumn = Number(header.dataset.col);
+      suppressSortUntil = Infinity;
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", String(draggedColumn));
+      header.classList.add("is-dragging-column");
+    });
+    elements.tableHead.addEventListener("dragover", (event) => {
+      if (draggedColumn === null) return;
+      const header = event.target.closest('th[draggable="true"]');
+      clearColumnDropMarkers();
+      if (!header) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "move";
+      if (Number(header.dataset.col) === draggedColumn) return;
+      const bounds = header.getBoundingClientRect();
+      header.classList.add(event.clientX < bounds.left + bounds.width / 2 ? "drop-before" : "drop-after");
+    });
+    elements.tableHead.addEventListener("dragleave", (event) => {
+      if (!elements.tableHead.contains(event.relatedTarget)) clearColumnDropMarkers();
+    });
+    elements.tableHead.addEventListener("drop", (event) => {
+      if (draggedColumn === null) return;
+      event.preventDefault();
+      const header = event.target.closest('th[draggable="true"]');
+      const sourceColumn = draggedColumn;
+      finishColumnDrag();
+      if (!header) return;
+      const bounds = header.getBoundingClientRect();
+      const targetColumn = Number(header.dataset.col);
+      const after = event.clientX >= bounds.left + bounds.width / 2;
+      applyColumnOrder(reorderColumn(state.columnOrder, sourceColumn, targetColumn, after));
+    });
+    elements.tableHead.addEventListener("dragend", finishColumnDrag);
 
     elements.tableHead.addEventListener("pointerdown", (event) => {
       const handle = event.target.closest("[data-resize-column]");
@@ -1154,6 +1309,7 @@
     });
     elements.resetViewButton.addEventListener("click", () => {
       state.visibleColumns = state.headers.map(() => true);
+      state.columnOrder = normalizeColumnOrder(null, state.headers.length);
       state.columnWidths = state.headers.map(() => 160);
       state.columnFilters = state.headers.map(() => "");
       state.globalQuery = "";
