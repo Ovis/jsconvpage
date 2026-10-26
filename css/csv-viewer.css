@@ -255,6 +255,31 @@ td[data-cell]:focus-visible,
   background: var(--surface-subtle);
 }
 
+.history-actions {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.history-button {
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  padding: 7px;
+  border: 1px solid var(--border);
+  color: var(--accent-strong);
+}
+
+.history-button svg {
+  width: 18px;
+  height: 18px;
+}
+
+.history-button:disabled {
+  opacity: .35;
+  background: transparent;
+}
+
 .link-button {
   padding: 4px;
   color: var(--accent-strong);
@@ -505,6 +530,16 @@ td[data-cell].is-selected {
 td[data-cell].is-hidden-cell {
   color: transparent;
   background-image: repeating-linear-gradient(135deg, transparent 0 6px, rgba(96, 112, 134, .14) 6px 8px);
+}
+
+td[data-cell].is-editing {
+  box-shadow: inset 0 0 0 2px var(--accent);
+  background: var(--surface) !important;
+  caret-color: var(--text);
+  cursor: text;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  user-select: text;
 }
 
 .sticky-column {

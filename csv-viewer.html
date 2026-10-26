@@ -70,6 +70,14 @@
         <button id="open-columns-button" class="button button-small" type="button" aria-haspopup="dialog">列を表示・非表示</button>
         <button id="open-column-order-button" class="button button-small" type="button" aria-haspopup="dialog">列の順番</button>
         <button id="open-hidden-button" class="button button-small" type="button" disabled>隠した項目 <span id="hidden-count">0</span></button>
+        <div class="history-actions" role="group" aria-label="セルの編集履歴">
+          <button id="undo-button" class="icon-button history-button" type="button" disabled title="元に戻す（Ctrl+Z）" aria-label="元に戻す（Ctrl+Z）" aria-keyshortcuts="Control+Z">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m9 14-5-5 5-5M4 9h10a6 6 0 0 1 0 12h-2" /></svg>
+          </button>
+          <button id="redo-button" class="icon-button history-button" type="button" disabled title="やり直す（Ctrl+Y／Ctrl+Shift+Z）" aria-label="やり直す（Ctrl+Y／Ctrl+Shift+Z）" aria-keyshortcuts="Control+Y Control+Shift+Z">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m15 14 5-5-5-5M20 9H10a6 6 0 0 0 0 12h2" /></svg>
+          </button>
+        </div>
       </div>
 
       <div class="display-toolbar">
@@ -92,7 +100,7 @@
         <button id="export-button" class="button button-small" type="button">表示中のデータを書き出す</button>
       </div>
 
-      <p id="selection-status" class="selection-status" aria-live="polite">セルをクリックすると選択できます。</p>
+      <p id="selection-status" class="selection-status" aria-live="polite">クリックでセルを選択、ダブルクリックで編集できます。</p>
 
       <div id="table-region" class="table-region" role="region" aria-label="CSVテーブル" tabindex="0">
         <table id="data-table">

@@ -309,13 +309,57 @@
     return result;
   }
 
+  class EditHistory {
+    constructor(limit = 100) {
+      this.limit = limit;
+      this.clear();
+    }
+
+    get canUndo() { return this.undoStack.length > 0; }
+    get canRedo() { return this.redoStack.length > 0; }
+
+    clear() {
+      this.undoStack = [];
+      this.redoStack = [];
+    }
+
+    record(change, merge = false) {
+      if (change.before === change.after) return;
+      const previous = this.undoStack.at(-1);
+      if (merge && !this.canRedo && previous && previous.after === change.before &&
+          previous.rowIndex === change.rowIndex && previous.columnIndex === change.columnIndex) {
+        previous.after = change.after;
+        previous.afterSelection = change.afterSelection;
+      } else {
+        this.undoStack.push({ ...change });
+        if (this.undoStack.length > this.limit) this.undoStack.shift();
+      }
+      this.redoStack = [];
+    }
+
+    undo() {
+      const change = this.undoStack.pop();
+      if (!change) return null;
+      this.redoStack.push(change);
+      return change;
+    }
+
+    redo() {
+      const change = this.redoStack.pop();
+      if (!change) return null;
+      this.undoStack.push(change);
+      return change;
+    }
+  }
+
   const exportedFunctions = {
     detectDelimiter,
     parseDelimited,
     validateParsedRows,
     escapeCsvValue,
     normalizeColumnOrder,
-    reorderColumn
+    reorderColumn,
+    EditHistory
   };
 
   if (typeof module !== "undefined" && module.exports) {
@@ -352,6 +396,8 @@
       hideRowsButton: document.getElementById("hide-rows-button"),
       openHiddenButton: document.getElementById("open-hidden-button"),
       hiddenCount: document.getElementById("hidden-count"),
+      undoButton: document.getElementById("undo-button"),
+      redoButton: document.getElementById("redo-button"),
       freezeCount: document.getElementById("freeze-count"),
       densitySelect: document.getElementById("density-select"),
       wrapToggle: document.getElementById("wrap-toggle"),
@@ -415,9 +461,14 @@
     };
 
     const collator = new Intl.Collator("ja", { numeric: true, sensitivity: "base" });
+    const editHistory = new EditHistory();
     let searchTimer = null;
     let draggedColumn = null;
     let suppressSortUntil = 0;
+    let cellEdit = null;
+    let pendingEditRefresh = false;
+    let editRefreshTimer = null;
+    let pointerIsDown = false;
 
     function displayDelimiter(delimiter) {
       if (delimiter === "\t") return "タブ区切り";
@@ -446,6 +497,10 @@
     }
 
     function clearDatasetForError(sourceName) {
+      finishCellEdit(false);
+      editHistory.clear();
+      updateHistoryButtons();
+      pendingEditRefresh = false;
       state.headers = [];
       state.displayHeaders = [];
       state.rows = [];
@@ -469,6 +524,10 @@
 
     function parseText(text, source) {
       clearTimeout(searchTimer);
+      finishCellEdit(false);
+      pendingEditRefresh = false;
+      editHistory.clear();
+      updateHistoryButtons();
       if (text.length > MAX_FILE_BYTES) {
         throw new CsvLoadError(
           "テキストが大きすぎます。",
@@ -760,12 +819,18 @@
     }
 
     function applyFiltersAndRender(resetLimit) {
+      finishCellEdit();
+      pendingEditRefresh = false;
       if (resetLimit) state.renderLimit = INITIAL_RENDER_COUNT;
+      updateViewRows();
+      renderBody();
+    }
+
+    function updateViewRows() {
       state.viewRows = state.rows
         .map((_, index) => index)
         .filter((index) => !state.hiddenRows.has(index) && rowMatches(state.rows[index]))
         .sort(compareRows);
-      renderBody();
     }
 
     function cellKey(rowIndex, columnIndex) {
@@ -777,6 +842,11 @@
     }
 
     function renderBody() {
+      finishCellEdit();
+      if (pendingEditRefresh) {
+        pendingEditRefresh = false;
+        updateViewRows();
+      }
       const fragment = document.createDocumentFragment();
       const visibleColumns = visibleColumnIndexes();
       const displayedRows = state.viewRows.slice(0, state.renderLimit);
@@ -837,13 +907,15 @@
     }
 
     function updateSelectionStatus() {
-      if (state.selectedCell !== null) {
+      if (cellEdit !== null) {
+        elements.selectionStatus.textContent = `編集中: ${state.displayHeaders[cellEdit.columnIndex]} / Enterで確定・Escで取り消し・Alt+Enterで改行`;
+      } else if (state.selectedCell !== null) {
         const [rowIndex, columnIndex] = state.selectedCell.split(":").map(Number);
         elements.selectionStatus.textContent = `選択中: CSV ${sourceLineNumber(rowIndex)} 行目 / ${state.displayHeaders[columnIndex]}`;
       } else if (state.selectedRows.size > 0) {
         elements.selectionStatus.textContent = `${state.selectedRows.size} 行を選択中です。`;
       } else {
-        elements.selectionStatus.textContent = "セルをクリックすると選択できます。行は左端のチェックボックスで選択できます。";
+        elements.selectionStatus.textContent = "クリックでセルを選択、ダブルクリックで編集できます。行は左端のチェックボックスで選択できます。";
       }
     }
 
@@ -1236,6 +1308,256 @@
       updateSelectionStatus();
     }
 
+    function beginCellEdit(cell) {
+      if (!cell || state.hiddenCells.has(cell.dataset.cell) || cellEdit?.cell === cell) return;
+      finishCellEdit();
+      selectCell(cell);
+      const rowIndex = Number(cell.dataset.row);
+      const columnIndex = Number(cell.dataset.col);
+      cellEdit = {
+        cell, rowIndex, columnIndex,
+        originalValue: state.rows[rowIndex][columnIndex],
+        lastValue: state.rows[rowIndex][columnIndex],
+        composing: false,
+        history: new EditHistory(),
+        beforeSelection: null,
+        lastInputType: "",
+        lastInputAt: 0
+      };
+      cell.contentEditable = "plaintext-only";
+      cell.spellcheck = false;
+      cell.classList.add("is-editing");
+      cell.removeAttribute("title");
+      cell.setAttribute("role", "textbox");
+      cell.setAttribute("aria-label", `${state.displayHeaders[columnIndex]}を編集`);
+      cell.setAttribute("aria-multiline", "true");
+      cell.focus({ preventScroll: true });
+      const range = document.createRange();
+      range.selectNodeContents(cell);
+      range.collapse(false);
+      const selection = window.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      updateSelectionStatus();
+      updateHistoryButtons();
+    }
+
+    function finishCellEdit(commit = true) {
+      if (cellEdit === null) return;
+      const { cell, rowIndex, columnIndex, originalValue } = cellEdit;
+      cellEdit = null;
+      const value = commit ? cell.textContent.replace(/\r\n?/g, "\n") : originalValue;
+      if (commit && value !== originalValue) {
+        editHistory.record({ rowIndex, columnIndex, before: originalValue, after: value });
+        state.rows[rowIndex][columnIndex] = value;
+        pendingEditRefresh = true;
+      }
+      cell.removeAttribute("contenteditable");
+      cell.removeAttribute("role");
+      cell.removeAttribute("aria-label");
+      cell.removeAttribute("aria-multiline");
+      cell.classList.remove("is-editing");
+      cell.textContent = value;
+      cell.title = value;
+      updateSelectionStatus();
+      updateHistoryButtons();
+    }
+
+    function updateHistoryButtons() {
+      const history = cellEdit?.history ?? editHistory;
+      elements.undoButton.disabled = Boolean(cellEdit?.composing) || !history.canUndo;
+      elements.redoButton.disabled = Boolean(cellEdit?.composing) || !history.canRedo;
+    }
+
+    function editorSelection() {
+      const selection = window.getSelection();
+      const cell = cellEdit.cell;
+      if (!selection?.anchorNode || !cell.contains(selection.anchorNode) || !cell.contains(selection.focusNode)) {
+        return { anchor: cell.textContent.length, focus: cell.textContent.length };
+      }
+      const offset = (node, position) => {
+        const range = document.createRange();
+        range.selectNodeContents(cell);
+        range.setEnd(node, position);
+        return range.toString().length;
+      };
+      return {
+        anchor: offset(selection.anchorNode, selection.anchorOffset),
+        focus: offset(selection.focusNode, selection.focusOffset)
+      };
+    }
+
+    function recordEditorInput(inputType) {
+      if (!cellEdit || cellEdit.composing) return;
+      const value = cellEdit.cell.textContent.replace(/\r\n?/g, "\n");
+      if (value === cellEdit.lastValue) return;
+      const afterSelection = editorSelection();
+      const beforeSelection = cellEdit.beforeSelection ?? afterSelection;
+      const previous = cellEdit.history.undoStack.at(-1);
+      const now = performance.now();
+      const merge = ["insertText", "deleteContentBackward", "deleteContentForward"].includes(inputType) &&
+        inputType === cellEdit.lastInputType && now - cellEdit.lastInputAt < 750 &&
+        beforeSelection.anchor === beforeSelection.focus && previous?.afterSelection?.focus === beforeSelection.focus;
+      cellEdit.history.record({
+        before: cellEdit.lastValue, after: value, beforeSelection, afterSelection
+      }, merge);
+      cellEdit.lastValue = value;
+      cellEdit.lastInputType = inputType;
+      cellEdit.lastInputAt = now;
+      cellEdit.beforeSelection = null;
+      updateHistoryButtons();
+    }
+
+    function applyEditHistory(direction) {
+      if (cellEdit) {
+        if (cellEdit.composing) return;
+        const change = cellEdit.history[direction]();
+        if (!change) return;
+        const value = direction === "undo" ? change.before : change.after;
+        const caret = direction === "undo" ? change.beforeSelection : change.afterSelection;
+        cellEdit.cell.textContent = value;
+        cellEdit.lastValue = value;
+        cellEdit.beforeSelection = null;
+        cellEdit.lastInputType = "";
+        cellEdit.lastInputAt = 0;
+        cellEdit.cell.focus({ preventScroll: true });
+        const node = cellEdit.cell.firstChild ?? cellEdit.cell;
+        window.getSelection()?.setBaseAndExtent(node, Math.min(caret.anchor, value.length), node, Math.min(caret.focus, value.length));
+      } else {
+        const change = editHistory[direction]();
+        if (!change) return;
+        state.rows[change.rowIndex][change.columnIndex] = direction === "undo" ? change.before : change.after;
+        applyFiltersAndRender(false);
+        focusCell(cellKey(change.rowIndex, change.columnIndex));
+        elements.selectionStatus.textContent = `${direction === "undo" ? "元に戻しました" : "やり直しました"}: CSV ${sourceLineNumber(change.rowIndex)} 行目 / ${state.displayHeaders[change.columnIndex]}`;
+      }
+      updateHistoryButtons();
+    }
+
+    function focusCell(key) {
+      const cell = elements.tableBody.querySelector(`td[data-cell="${key}"]`);
+      if (cell) {
+        selectCell(cell);
+        cell.focus({ preventScroll: true });
+      } else {
+        elements.tableRegion.focus({ preventScroll: true });
+      }
+    }
+
+    function scheduleEditRefresh() {
+      clearTimeout(editRefreshTimer);
+      if (!pendingEditRefresh || pointerIsDown || cellEdit !== null) return;
+      // ポインター操作ではクリックの処理が終わるまで、操作対象のDOMを作り直さない。
+      editRefreshTimer = setTimeout(() => {
+        if (!pendingEditRefresh || pointerIsDown || cellEdit !== null) return;
+        const focused = document.activeElement;
+        const focusedCell = focused?.dataset.cell;
+        const focusedRow = focused?.dataset.selectRow;
+        applyFiltersAndRender(false);
+        if (focusedCell !== undefined) focusCell(focusedCell);
+        else if (focusedRow !== undefined) {
+          elements.tableBody.querySelector(`input[data-select-row="${focusedRow}"]`)?.focus({ preventScroll: true });
+        }
+      }, 0);
+    }
+
+    function insertCellText(text) {
+      if (cellEdit === null) return;
+      const selection = window.getSelection();
+      if (!selection?.rangeCount) return;
+      const range = selection.getRangeAt(0);
+      if (!cellEdit.cell.contains(range.commonAncestorContainer)) return;
+      cellEdit.beforeSelection = editorSelection();
+      // 貼り付け内容はHTMLとして解釈せず、必ずテキストノードで挿入する。
+      const node = document.createTextNode(text.replace(/\r\n?/g, "\n"));
+      range.deleteContents();
+      range.insertNode(node);
+      range.setStartAfter(node);
+      range.collapse(true);
+      selection.removeAllRanges();
+      selection.addRange(range);
+      recordEditorInput("insertFromPaste");
+    }
+
+    document.addEventListener("pointerdown", () => { pointerIsDown = true; }, true);
+    ["pointerup", "pointercancel"].forEach((eventName) => {
+      document.addEventListener(eventName, () => {
+        pointerIsDown = false;
+        scheduleEditRefresh();
+      }, true);
+    });
+    window.addEventListener("blur", () => {
+      pointerIsDown = false;
+      finishCellEdit();
+      scheduleEditRefresh();
+    });
+
+    elements.tableBody.addEventListener("dblclick", (event) => {
+      const cell = event.target.closest("td[data-cell]");
+      if (!cell || cellEdit?.cell === cell) return;
+      event.preventDefault();
+      beginCellEdit(cell);
+    });
+    elements.tableBody.addEventListener("focusout", (event) => {
+      if (cellEdit?.cell !== event.target) return;
+      finishCellEdit();
+      scheduleEditRefresh();
+    });
+    elements.tableBody.addEventListener("compositionstart", () => {
+      if (cellEdit) {
+        cellEdit.beforeSelection = editorSelection();
+        cellEdit.composing = true;
+        updateHistoryButtons();
+      }
+    });
+    elements.tableBody.addEventListener("compositionend", () => {
+      if (cellEdit) {
+        cellEdit.composing = false;
+        recordEditorInput("insertCompositionText");
+        updateHistoryButtons();
+      }
+    });
+    elements.tableBody.addEventListener("paste", (event) => {
+      if (cellEdit?.cell !== event.target.closest("td[data-cell]")) return;
+      event.preventDefault();
+      insertCellText(event.clipboardData?.getData("text/plain") ?? "");
+    });
+    elements.tableBody.addEventListener("drop", (event) => {
+      if (cellEdit !== null) event.preventDefault();
+    });
+    elements.tableBody.addEventListener("beforeinput", (event) => {
+      if (cellEdit === null) return;
+      if (event.inputType === "historyUndo" || event.inputType === "historyRedo") {
+        event.preventDefault();
+        applyEditHistory(event.inputType === "historyUndo" ? "undo" : "redo");
+        return;
+      }
+      if (event.inputType.startsWith("format") || event.inputType === "insertFromDrop") event.preventDefault();
+      if (!cellEdit.composing) cellEdit.beforeSelection = editorSelection();
+    });
+    elements.tableBody.addEventListener("input", (event) => {
+      recordEditorInput(event.inputType);
+    });
+
+    [[elements.undoButton, "undo"], [elements.redoButton, "redo"]].forEach(([button, direction]) => {
+      button.addEventListener("pointerdown", (event) => {
+        // 編集中でもフォーカスをセルに保ち、未確定の入力履歴を操作する。
+        event.preventDefault();
+      });
+      button.addEventListener("click", () => applyEditHistory(direction));
+    });
+    document.addEventListener("keydown", (event) => {
+      if (elements.viewer.hidden || event.defaultPrevented || event.isComposing || event.keyCode === 229 ||
+          event.altKey || !(event.ctrlKey || event.metaKey)) return;
+      const key = event.key.toLowerCase();
+      const direction = key === "y" || (key === "z" && event.shiftKey) ? "redo" : (key === "z" ? "undo" : null);
+      if (!direction) return;
+      const target = event.target;
+      if (target.closest("input, textarea, select, [contenteditable]") && cellEdit?.cell !== target.closest("td[data-cell]")) return;
+      event.preventDefault();
+      applyEditHistory(direction);
+    });
+
     elements.tableBody.addEventListener("click", (event) => {
       const checkbox = event.target.closest("input[data-select-row]");
       if (checkbox) {
@@ -1249,9 +1571,36 @@
       selectCell(event.target.closest("td[data-cell]"));
     });
     elements.tableBody.addEventListener("keydown", (event) => {
-      if (event.key !== "Enter" && event.key !== " ") return;
       const cell = event.target.closest("td[data-cell]");
       if (!cell) return;
+      if (cellEdit?.cell === cell) {
+        if (event.isComposing || cellEdit.composing || event.keyCode === 229) return;
+        if (event.key === "Enter" && event.altKey) {
+          event.preventDefault();
+          insertCellText("\n");
+        } else if (["Enter", "Escape", "Tab"].includes(event.key)) {
+          event.preventDefault();
+          let targetKey = cell.dataset.cell;
+          if (event.key === "Tab") {
+            const columns = visibleColumnIndexes();
+            const rowPosition = state.viewRows.indexOf(cellEdit.rowIndex);
+            const position = rowPosition * columns.length + columns.indexOf(cellEdit.columnIndex) + (event.shiftKey ? -1 : 1);
+            if (position >= 0 && position < Math.min(state.renderLimit, state.viewRows.length) * columns.length) {
+              targetKey = cellKey(state.viewRows[Math.floor(position / columns.length)], columns[position % columns.length]);
+            }
+          }
+          finishCellEdit(event.key !== "Escape");
+          applyFiltersAndRender(false);
+          focusCell(targetKey);
+        }
+        return;
+      }
+      if (event.key === "F2") {
+        event.preventDefault();
+        beginCellEdit(cell);
+        return;
+      }
+      if (event.key !== "Enter" && event.key !== " ") return;
       event.preventDefault();
       selectCell(cell);
     });
